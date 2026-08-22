@@ -1,0 +1,464 @@
+import { useEffect, useRef, useState } from "react";
+import { ConnectionConfig } from "@/types/database";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useEditorStore } from "@/stores/editorStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { tauriService } from "@/services/tauriService";
+import { extractSingleTable, cn } from "@/lib/utils";
+import { ConnectionTree } from "@/components/connection/ConnectionTree";
+import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
+import { SQLEditorPanel } from "@/components/editor/SQLEditor";
+import { DataGrid } from "@/components/result/DataGrid";
+import { DatabaseOverview } from "@/components/DatabaseOverview";
+import { TableView } from "@/components/TableView";
+import { CreateTableView } from "@/components/CreateTableView";
+import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui";
+import { ContextMenu } from "@/components/ContextMenu";
+import { useThemeStore } from "@/stores/themeStore";
+
+export default function App() {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<ConnectionConfig | null>(null);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // tab 条右键菜单
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
+  // tab 条溢出检测：压缩到最小宽度后仍放不下时，显示左右移动按钮
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const [tabOverflow, setTabOverflow] = useState(false);
+
+  const activeConnection = useConnectionStore((s) => s.activeConnection);
+  const selectedDatabase = useConnectionStore((s) => s.selectedDatabase);
+  const saved = useConnectionStore((s) => s.saved);
+  const setSaved = useConnectionStore((s) => s.setSaved);
+
+  const wsTabs = useWorkspaceStore((s) => s.tabs);
+  const activeWsId = useWorkspaceStore((s) => s.activeId);
+  const activateWs = useWorkspaceStore((s) => s.activate);
+  const closeWs = useWorkspaceStore((s) => s.close);
+  const openQuery = useWorkspaceStore((s) => s.openQuery);
+
+  const setTabResult = useEditorStore((s) => s.setTabResult);
+  const setTabExecuting = useEditorStore((s) => s.setTabExecuting);
+  const setTabQueryId = useEditorStore((s) => s.setTabQueryId);
+  const setTabContext = useEditorStore((s) => s.setTabContext);
+
+  const theme = useThemeStore((s) => s.theme);
+  const toggleTheme = useThemeStore((s) => s.toggle);
+
+  // 启动时加载已保存的连接
+  useEffect(() => {
+    tauriService
+      .listSavedConnections()
+      .then(setSaved)
+      .catch((err) => console.error("加载已保存连接失败:", err));
+  }, [setSaved]);
+
+  // tab 条溢出检测：tab 数/窗口宽度变化时重新计算
+  useEffect(() => {
+    const el = tabBarRef.current;
+    if (!el) return;
+    const check = () => setTabOverflow(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    window.addEventListener("resize", check);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", check);
+    };
+  }, [wsTabs.length, sidebarVisible]);
+
+  // 全局禁用 webview 默认右键菜单（刷新/另存为/检查），自定义右键菜单不受影响
+  useEffect(() => {
+    const suppress = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener("contextmenu", suppress);
+    return () => window.removeEventListener("contextmenu", suppress);
+  }, []);
+
+  const handleExecute = async (sql: string, editorTabId: string) => {
+    if (!activeConnection || !selectedDatabase) {
+      setError("请先在左侧选择要查询的数据库");
+      return;
+    }
+    setError(null);
+    const queryId = Date.now();
+    setTabExecuting(editorTabId, true);
+    setTabQueryId(editorTabId, queryId);
+
+    try {
+      const result = await tauriService.executeQuery(activeConnection, sql, selectedDatabase, queryId);
+      setTabResult(editorTabId, result);
+      // 单表 SELECT 结果集允许编辑：提取表名并拉取主键信息
+      if (!result.error && result.columns.length > 0) {
+        const table = extractSingleTable(sql);
+        if (table) {
+          try {
+            const cols = await tauriService.getColumns(activeConnection, selectedDatabase, table);
+            const driverType =
+              useConnectionStore.getState().saved.find((c) => c.id === activeConnection)
+                ?.driverType ?? "mysql";
+            setTabContext(editorTabId, sql, {
+              connectionId: activeConnection,
+              database: selectedDatabase,
+              table,
+              primaryKeys: cols.filter((c) => c.isPrimaryKey).map((c) => c.name),
+              driverType,
+            });
+          } catch {
+            setTabContext(editorTabId, sql, null); // 拉不到主键信息则只读
+          }
+        } else {
+          setTabContext(editorTabId, sql, null);
+        }
+      } else {
+        setTabContext(editorTabId, sql, null);
+      }
+    } catch (err) {
+      const errorResult = {
+        columns: [],
+        rows: [],
+        executionTimeMs: 0,
+        error: String(err),
+      };
+      setTabResult(editorTabId, errorResult);
+      setError(`执行失败: ${err}`);
+    } finally {
+      setTabExecuting(editorTabId, false);
+    }
+  };
+
+  const handleCancel = (editorTabId: string) => {
+    const tab = useEditorStore.getState().tabs.find((t) => t.id === editorTabId);
+    if (activeConnection && tab?.queryId !== undefined) {
+      tauriService.cancelQuery(activeConnection, tab.queryId).catch((err) => {
+        setError(`取消失败: ${err}`);
+      });
+    }
+  };
+
+  /** 数据网格编辑提交：事务执行后重新跑一遍原 SQL 刷新结果 */
+  const handleApplyEdits = async (editorTabId: string, statements: string[]) => {
+    if (!activeConnection || !selectedDatabase) return;
+    await tauriService.executeBatch(activeConnection, selectedDatabase, statements);
+    const tab = useEditorStore.getState().tabs.find((t) => t.id === editorTabId);
+    if (tab?.lastSql) {
+      await handleExecute(tab.lastSql, editorTabId);
+    }
+  };
+
+  /** 执行全部：整页 SQL 拆成多条语句，批量执行（DDL 脚本用） */
+  const handleExecuteAll = async (statements: string[], editorTabId: string) => {
+    if (!activeConnection || !selectedDatabase) {
+      setError("请先在左侧选择要查询的数据库");
+      return;
+    }
+    setError(null);
+    setTabExecuting(editorTabId, true);
+    const started = Date.now();
+    try {
+      const affected = await tauriService.executeBatch(activeConnection, selectedDatabase, statements);
+      setTabResult(editorTabId, {
+        columns: [],
+        rows: [],
+        executionTimeMs: Date.now() - started,
+        rowsAffected: affected,
+      });
+    } catch (err) {
+      setTabResult(editorTabId, {
+        columns: [],
+        rows: [],
+        executionTimeMs: Date.now() - started,
+        error: String(err),
+      });
+      setError(`批量执行失败: ${err}`);
+    } finally {
+      setTabExecuting(editorTabId, false);
+    }
+  };
+
+  const activeWs = wsTabs.find((t) => t.id === activeWsId);
+
+  const wsTabIcon = (kind: string) => {
+    switch (kind) {
+      case "database":
+        return <FolderOpen className="h-3.5 w-3.5 text-blue-500" />;
+      case "table":
+        return <Table2 className="h-3.5 w-3.5 text-green-600" />;
+      case "createTable":
+        return <Plus className="h-3.5 w-3.5 text-amber-500" />;
+      default:
+        return <FileCode2 className="h-3.5 w-3.5 text-purple-500" />;
+    }
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
+      {/* 主体区域（顶部分左右：侧栏标题栏 | tab 条） */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* 左侧边栏 */}
+        {sidebarVisible && (
+          <div className="w-64 flex-shrink-0">
+            <ConnectionTree
+              onNewConnection={() => {
+                setEditingConnection(null);
+                setDialogOpen(true);
+              }}
+              onEditConnection={(cfg) => {
+                setEditingConnection(cfg);
+                setDialogOpen(true);
+              }}
+            />
+          </div>
+        )}
+
+        {/* 右侧工作台 */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {error && (
+            <div className="px-4 py-2 bg-red-50 text-red-800 text-sm border-b border-red-200 flex items-center justify-between">
+              <span>{error}</span>
+              <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800">
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* 工作台 tab 条：左侧栏开关，右侧主题/连接状态 */}
+          <div className="flex items-center border-b bg-muted/30 flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 mx-1 flex-shrink-0"
+              title={sidebarVisible ? "收起侧栏" : "展开侧栏"}
+              onClick={() => setSidebarVisible(!sidebarVisible)}
+            >
+              {sidebarVisible ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </Button>
+            {tabOverflow && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-6 flex-shrink-0"
+                title="向左移动"
+                onClick={() => tabBarRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <div ref={tabBarRef} className="flex-1 flex min-w-0 overflow-x-auto no-scrollbar">
+              {wsTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`tree-node group flex items-center gap-1 px-3 py-1.5 text-xs cursor-pointer border-r min-w-[72px] max-w-[180px] flex-shrink ${
+                    activeWsId === tab.id
+                      ? "tree-node-active bg-background font-medium"
+                      : "text-muted-foreground"
+                  }`}
+                  onClick={() => activateWs(tab.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
+                  }}
+                >
+                  {tab.kind === "query" ? (
+                    <FileCode2 className="h-3.5 w-3.5" />
+                  ) : tab.kind === "database" ? (
+                    <Database className="h-3.5 w-3.5" />
+                  ) : tab.kind === "createTable" ? (
+                    <Plus className="h-3.5 w-3.5" />
+                  ) : (
+                    <Table2 className="h-3.5 w-3.5" />
+                  )}
+                  <span className="flex-1 min-w-0 truncate">{tab.title}</span>
+                  <button
+                    className="rounded p-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 hover:bg-muted"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeWs(tab.id);
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {tabOverflow && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-6 flex-shrink-0"
+                title="向右移动"
+                onClick={() => tabBarRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              title="新建查询"
+              onClick={() => {
+                if (activeConnection) openQuery(activeConnection);
+                else setError("请先在左侧选择一个连接");
+              }}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              title={theme === "dark" ? "切换浅色主题" : "切换深色主题"}
+              onClick={toggleTheme}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            {activeConnection && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground px-3 flex-shrink-0">
+                <div className="w-2 h-2 rounded-full bg-green-500" />
+                <span>
+                  {saved.find((c) => c.id === activeConnection)?.name}
+                  {selectedDatabase ? ` / ${selectedDatabase}` : ""}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {wsTabs.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+              <Database className="h-12 w-12 mb-3 opacity-30" />
+              <p className="text-sm">在左侧连接树中点击数据库查看表清单，点击表查看数据与结构</p>
+              <p className="text-xs mt-1 opacity-70">
+                或{" "}
+                <button
+                  className="text-blue-600 hover:underline"
+                  onClick={() => activeConnection && openQuery(activeConnection)}
+                >
+                  新建查询
+                </button>
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* tab 内容 */}
+              <div className="flex-1 min-h-0">
+                {activeWs?.kind === "database" && activeWs.database && (
+                  <DatabaseOverview
+                    connectionId={activeWs.connectionId}
+                    database={activeWs.database}
+                  />
+                )}
+                {activeWs?.kind === "table" && activeWs.database && activeWs.table && (
+                  <TableView
+                    connectionId={activeWs.connectionId}
+                    database={activeWs.database}
+                    table={activeWs.table}
+                  />
+                )}
+                {activeWs?.kind === "createTable" && activeWs.database && (
+                  <CreateTableView
+                    connectionId={activeWs.connectionId}
+                    database={activeWs.database}
+                    tabId={activeWs.id}
+                  />
+                )}
+                {activeWs?.kind === "query" && activeWs.editorTabId && (
+                  <QueryPanel
+                    editorTabId={activeWs.editorTabId}
+                    connectionId={activeConnection}
+                    onExecute={handleExecute}
+                    onExecuteAll={handleExecuteAll}
+                    onCancel={handleCancel}
+                    onApplyEdits={handleApplyEdits}
+                  />
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* tab 右键菜单：关闭 / 关闭其他 / 关闭全部 */}
+      {tabMenu && (
+        <ContextMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          items={[
+            {
+              label: "关闭",
+              onClick: () => closeWs(tabMenu.tabId),
+            },
+            {
+              label: "关闭其他",
+              onClick: () => {
+                useWorkspaceStore
+                  .getState()
+                  .tabs.filter((t) => t.id !== tabMenu.tabId)
+                  .forEach((t) => useWorkspaceStore.getState().close(t.id));
+              },
+            },
+            {
+              label: "关闭全部",
+              onClick: () => {
+                useWorkspaceStore
+                  .getState()
+                  .tabs.forEach((t) => useWorkspaceStore.getState().close(t.id));
+              },
+            },
+          ]}
+          onClose={() => setTabMenu(null)}
+        />
+      )}
+
+      {/* 连接对话框 */}
+      <ConnectionDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        editing={editingConnection}
+      />
+    </div>
+  );
+}
+
+/** 查询工作台页：编辑器 + 结果网格 */
+function QueryPanel({
+  editorTabId,
+  connectionId,
+  onExecute,
+  onExecuteAll,
+  onCancel,
+  onApplyEdits,
+}: {
+  editorTabId: string;
+  connectionId: string | null;
+  onExecute: (sql: string, tabId: string) => void;
+  onExecuteAll: (statements: string[], tabId: string) => void;
+  onCancel: (tabId: string) => void;
+  onApplyEdits: (tabId: string, statements: string[]) => Promise<void>;
+}) {
+  const tab = useEditorStore((s) => s.tabs.find((t) => t.id === editorTabId));
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 min-h-0">
+        <SQLEditorPanel
+          tabId={editorTabId}
+          connectionId={connectionId}
+          onExecute={onExecute}
+          onExecuteAll={onExecuteAll}
+          onCancel={onCancel}
+        />
+      </div>
+      <div className="h-64 border-t flex-shrink-0">
+        <DataGrid
+          result={tab?.result}
+          editContext={tab?.editContext}
+          onApplyEdits={(statements) => onApplyEdits(editorTabId, statements)}
+        />
+      </div>
+    </div>
+  );
+}

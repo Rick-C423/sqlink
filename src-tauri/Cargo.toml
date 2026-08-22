@@ -1,0 +1,50 @@
+[package]
+name = "sqlconnect"
+version = "0.1.0"
+description = "SQLink - 数据库管理工具"
+authors = ["SQLink Team"]
+edition = "2021"
+rust-version = "1.78"
+
+[lib]
+name = "sqlconnect_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+
+# 连接配置持久化（密码 AES-256-GCM 加密）
+aes-gcm = "0.10"
+base64 = "0.22"
+rand = "0.8"
+
+# 数据库驱动
+mysql_async = { version = "0.34", default-features = false, features = ["rustls-tls"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1"] }
+# SQLite 驱动（bundled 自带编译 sqlite3，无需本地库）
+rusqlite = { version = "0.32", features = ["bundled", "column_decltype"] }
+# SQL Server 驱动（TDS 协议，rustls 加密；chrono 解码日期时间；关默认特性避免与 native-tls 冲突）
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+# GBK/GB18030 列解码（MySQL 老库常见）
+encoding_rs = "0.8"
+
+# 修复 flate2 zlib 后端冲突
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
