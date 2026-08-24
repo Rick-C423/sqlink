@@ -327,6 +327,16 @@ const zhCN = {
   "ws.newTableTab": "新建表 · {database}",
   "ws.query": "查询",
   "ws.queryN": "查询 {n}",
+
+  // ---------- 侧栏数据库信息面板（DatabaseInfoPanel.tsx） ----------
+  "common.loading": "加载中…",
+  "dbinfo.charset": "字符集",
+  "dbinfo.encoding": "编码",
+  "dbinfo.collation": "排序规则",
+  "dbinfo.tables": "表数量",
+  "dbinfo.size": "数据大小",
+  "dbinfo.expand": "展开数据库信息",
+  "dbinfo.collapse": "收起数据库信息",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;

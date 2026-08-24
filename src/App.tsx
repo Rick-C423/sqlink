@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { tauriService } from "@/services/tauriService";
 import { extractSingleTable, cn } from "@/lib/utils";
 import { ConnectionTree } from "@/components/connection/ConnectionTree";
+import { DatabaseInfoPanel } from "@/components/connection/DatabaseInfoPanel";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { SQLEditorPanel } from "@/components/editor/SQLEditor";
 import { DataGrid } from "@/components/result/DataGrid";
@@ -229,17 +230,22 @@ export default function App() {
         {/* 左侧边栏（宽度可拖拽） */}
         {sidebarVisible && (
           <>
-            <div className="flex-shrink-0 min-w-0" style={{ width: sidebarWidth }}>
-              <ConnectionTree
-                onNewConnection={() => {
-                  setEditingConnection(null);
-                  setDialogOpen(true);
-                }}
-                onEditConnection={(cfg) => {
-                  setEditingConnection(cfg);
-                  setDialogOpen(true);
-                }}
-              />
+            <div className="flex-shrink-0 min-w-0 flex flex-col" style={{ width: sidebarWidth }}>
+              <div className="flex-1 min-h-0">
+                <ConnectionTree
+                  onNewConnection={() => {
+                    setEditingConnection(null);
+                    setDialogOpen(true);
+                  }}
+                  onEditConnection={(cfg) => {
+                    setEditingConnection(cfg);
+                    setDialogOpen(true);
+                  }}
+                />
+              </div>
+              {activeConnection && selectedDatabase && (
+                <DatabaseInfoPanel connectionId={activeConnection} database={selectedDatabase} />
+              )}
             </div>
             <Resizer
               orientation="vertical"

@@ -325,6 +325,16 @@ const enUS: Record<MessageKey, string> = {
   "ws.newTableTab": "New Table · {database}",
   "ws.query": "Query",
   "ws.queryN": "Query {n}",
+
+  // ---------- Sidebar database info panel (DatabaseInfoPanel.tsx) ----------
+  "common.loading": "Loading…",
+  "dbinfo.charset": "Charset",
+  "dbinfo.encoding": "Encoding",
+  "dbinfo.collation": "Collation",
+  "dbinfo.tables": "Tables",
+  "dbinfo.size": "Size",
+  "dbinfo.expand": "Show database info",
+  "dbinfo.collapse": "Hide database info",
 };
 
 export default enUS;
