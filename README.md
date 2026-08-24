@@ -21,6 +21,23 @@
 
 SQLink 是一个轻量、快速、跨平台的数据库客户端，基于 **Tauri 2**（Rust 后端 + WebView 前端）构建。相比 Electron 方案，安装包更小、内存占用更低、启动更快；相比重量级 IDE，界面更聚焦日常的数据库浏览、查询和编辑工作。
 
+## 界面预览
+
+<p align="center">
+  <img src="docs/screenshots/data-grid.png" alt="数据网格：连接树 / 筛选 / 分页 / 行编辑" />
+</p>
+<p align="center"><i>数据网格：连接树、可视化筛选、分页浏览、行内编辑</i></p>
+
+<p align="center">
+  <img src="docs/screenshots/connection-dialog.png" alt="新建连接对话框：四种数据库类型" />
+</p>
+<p align="center"><i>新建连接：MySQL / PostgreSQL / SQLite / SQL Server，密码加密存储</i></p>
+
+<p align="center">
+  <img src="docs/screenshots/main-window.png" alt="主界面" />
+</p>
+<p align="center"><i>主界面：简洁的多标签工作台</i></p>
+
 ## 支持的数据库
 
 | 数据库 | 驱动 | 说明 |
