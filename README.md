@@ -107,12 +107,14 @@ SQLink 是一个轻量、快速、跨平台的数据库客户端，基于 **Taur
 
 不想自己编译？直接去 [Releases](https://github.com/Rick-C423/sqlink/releases) 下载最新版本：
 
-| 产物 | 说明 |
-| --- | --- |
-| `SQLink_<版本>_x64_en-US.msi` / `SQLink-<版本>-setup.exe` | Windows 安装包，安装后出现在开始菜单 |
-| `SQLink-<版本>-portable.zip` | 解压直用便携版，无需安装，解压后运行 `SQLink.exe` |
+| 平台 | 产物 | 说明 |
+| --- | --- | --- |
+| Windows | `SQLink_<版本>_x64-setup.exe` / `.msi` | 安装包，安装后出现在开始菜单 |
+| Windows | `SQLink-<版本>-portable.zip` | 解压直用便携版，解压后运行 `SQLink.exe` |
+| macOS | `aarch64` / `x64` 的 `.dmg` | 分别对应 Apple Silicon 和 Intel；未签名，首次打开请右键 → 打开 |
+| Linux | `.deb` / `.AppImage` / `.rpm` | 按需选择发行版对应格式 |
 
-两种产物的连接配置都存放在用户目录，互不冲突，可以共存。
+各平台安装包由 GitHub Actions 自动构建（见 `.github/workflows/release.yml`，打 `v*` 标签即触发三平台矩阵构建）。连接配置都存放在用户目录，安装版与便携版互不冲突。
 
 ## 快速开始
 
