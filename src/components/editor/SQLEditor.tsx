@@ -1,11 +1,13 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import { useThemeStore } from "@/stores/themeStore";
 
 import * as monaco from "monaco-editor";
 import { useEditorStore } from "@/stores/editorStore";
-import { Play, Square, Loader2, FastForward } from "lucide-react";
+import { Play, Square, Loader2, FastForward, History, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui";
+import { tauriService } from "@/services/tauriService";
+import type { HistoryEntry } from "@/types/database";
 
 // 配置 Monaco Editor loader
 loader.config({ monaco });
@@ -147,6 +149,70 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
   const isExecuting = tab?.isExecuting ?? false;
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 
+  // 查询历史面板
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    if (!connectionId) {
+      setHistoryList([]);
+      return;
+    }
+    try {
+      setHistoryList(await tauriService.listHistory(connectionId, 100));
+    } catch {
+      // 历史加载失败不影响编辑
+    }
+  }, [connectionId]);
+
+  // 面板打开时加载；执行完成后（executionTime 变化）刷新
+  const lastExecTime = tab?.executionTime;
+  useEffect(() => {
+    if (historyOpen) loadHistory();
+  }, [historyOpen, loadHistory, lastExecTime]);
+
+  /** 回填编辑器：空则直接填入，非空追加到末尾 */
+  const fillFromHistory = useCallback(
+    (sql: string) => {
+      const current = editorRef.current?.getModel()?.getValue() ?? "";
+      const next = current.trim() ? `${current.replace(/\s+$/, "")}\n\n${sql}` : sql;
+      updateTabContent(tabId, next);
+      editorRef.current?.focus();
+    },
+    [tabId, updateTabContent]
+  );
+
+  const handleDeleteHistory = useCallback(async (id: string) => {
+    try {
+      await tauriService.deleteHistory(id);
+      setHistoryList((list) => list.filter((e) => e.id !== id));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleClearHistory = useCallback(async () => {
+    if (!connectionId) return;
+    if (!window.confirm("清空当前连接的全部查询历史？")) return;
+    try {
+      await tauriService.clearHistory(connectionId);
+      setHistoryList([]);
+    } catch {
+      // ignore
+    }
+  }, [connectionId]);
+
+  /** 今天显示时分秒，跨天显示月-日 时:分 */
+  const formatHistoryTime = (ts: number) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return sameDay
+      ? `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+      : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   const handleExecute = useCallback(() => {
     if (!connectionId) return;
     const editor = editorRef.current;
@@ -240,6 +306,17 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             执行全部
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!connectionId}
+          className={`h-7${historyOpen ? " bg-muted" : ""}`}
+          title="查询历史"
+          onClick={() => setHistoryOpen((v) => !v)}
+        >
+          <History className="mr-1.5 h-3.5 w-3.5" />
+          历史
+        </Button>
         {!connectionId && (
           <span className="text-xs text-muted-foreground">请先连接数据库</span>
         )}
@@ -251,8 +328,8 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
         )}
       </div>
 
-      {/* 编辑器 */}
-      <div className="flex-1 min-h-0">
+      {/* 编辑器 + 历史面板（面板覆盖在编辑器右侧） */}
+      <div className="flex-1 min-h-0 relative">
         <Editor
           height="100%"
           language="sql"
@@ -277,6 +354,81 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             formatOnPaste: true,
           }}
         />
+
+        {historyOpen && (
+          <div className="absolute right-0 top-0 bottom-0 w-80 border-l bg-background z-10 flex flex-col shadow-lg">
+            {/* 面板头 */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0">
+              <History className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium">查询历史</span>
+              <span className="text-[10px] text-muted-foreground">
+                仅记录执行成功的语句
+              </span>
+              <div className="ml-auto flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-1.5 text-xs text-muted-foreground"
+                  title="清空当前连接的历史"
+                  onClick={handleClearHistory}
+                  disabled={historyList.length === 0}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-1.5 text-xs"
+                  title="关闭"
+                  onClick={() => setHistoryOpen(false)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+
+            {/* 历史列表 */}
+            <div className="flex-1 overflow-y-auto">
+              {historyList.length === 0 ? (
+                <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                  暂无历史记录
+                  <br />
+                  执行成功的语句会自动记录在这里
+                </div>
+              ) : (
+                historyList.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="group px-3 py-2 border-b border-border/50 hover:bg-muted/40 cursor-pointer"
+                    title="点击回填到编辑器"
+                    onClick={() => fillFromHistory(entry.sql)}
+                  >
+                    <div className="font-mono text-xs leading-4 line-clamp-2 break-all">
+                      {entry.sql}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span>{formatHistoryTime(entry.executedAt)}</span>
+                      <span>{entry.durationMs}ms</span>
+                      <span>
+                        {entry.rowCount ?? 0} 行{entry.truncated ? "(截断)" : ""}
+                      </span>
+                      <button
+                        className="ml-auto opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+                        title="删除该条"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteHistory(entry.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

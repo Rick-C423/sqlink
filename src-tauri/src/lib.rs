@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod database;
+pub mod history;
 pub mod models;
 pub mod store;
 
@@ -36,6 +37,10 @@ pub fn run() {
             // SQL 转储导入
             commands::import::sql_import_file,
             commands::import::sql_dump_file,
+            // 查询历史
+            commands::history::history_list,
+            commands::history::history_delete,
+            commands::history::history_clear,
             // 窗口主题
             commands::window::set_window_theme,
         ])

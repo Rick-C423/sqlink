@@ -88,7 +88,7 @@ export default function App() {
     setTabQueryId(editorTabId, queryId);
 
     try {
-      const result = await tauriService.executeQuery(activeConnection, sql, selectedDatabase, queryId);
+      const result = await tauriService.executeQuery(activeConnection, sql, selectedDatabase, queryId, true);
       setTabResult(editorTabId, result);
       // 单表 SELECT 结果集允许编辑：提取表名并拉取主键信息
       if (!result.error && result.columns.length > 0) {

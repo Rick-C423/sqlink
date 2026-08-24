@@ -9,16 +9,24 @@ pub async fn query_execute(
     sql: String,
     database: Option<String>,
     query_id: Option<u64>,
+    // 为 true 时记录到查询历史（仅编辑器手动执行传 true，内部加载不传）
+    record: Option<bool>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<QueryResult, String> {
     let driver = manager.get_connection(&connection_id).await
         .map_err(|e| e.to_string())?;
 
-    if returns_rows(&sql) {
-        driver.query(&sql, database.as_deref(), query_id).await.map_err(|e| e.to_string())
+    let result = if returns_rows(&sql) {
+        driver.query(&sql, database.as_deref(), query_id).await
     } else {
-        driver.execute(&sql, database.as_deref(), query_id).await.map_err(|e| e.to_string())
+        driver.execute(&sql, database.as_deref(), query_id).await
     }
+    .map_err(|e| e.to_string())?;
+
+    if record == Some(true) {
+        manager.record_history(&connection_id, database.as_deref(), &sql, &result);
+    }
+    Ok(result)
 }
 
 #[tauri::command]

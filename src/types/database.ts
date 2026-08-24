@@ -57,6 +57,18 @@ export interface DumpSummary {
   rows: number;
 }
 
+/** 查询历史记录条目 */
+export interface HistoryEntry {
+  id: string;
+  connectionId: string;
+  database?: string;
+  sql: string;
+  executedAt: number;
+  durationMs: number;
+  rowCount?: number;
+  truncated: boolean;
+}
+
 export interface ColumnInfo {
   name: string;
   dataType: string;

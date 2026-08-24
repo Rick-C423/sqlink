@@ -88,6 +88,21 @@ pub struct ForeignKeyInfo {
     pub on_delete: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub id: String,
+    pub connection_id: String,
+    pub database: Option<String>,
+    pub sql: String,
+    /// epoch 毫秒
+    pub executed_at: i64,
+    pub duration_ms: u64,
+    /// 返回行数（查询）或影响行数（写入）
+    pub row_count: Option<u64>,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSummary {

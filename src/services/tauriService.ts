@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ConnectionConfig, QueryResult, TableInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary } from "@/types/database";
+import { ConnectionConfig, QueryResult, TableInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry } from "@/types/database";
 
 export const tauriService = {
   // 连接管理
@@ -92,13 +92,27 @@ export const tauriService = {
     connectionId: string,
     sql: string,
     database?: string,
-    queryId?: number
+    queryId?: number,
+    record?: boolean
   ): Promise<QueryResult> {
-    return await invoke("query_execute", { connectionId, sql, database, queryId });
+    return await invoke("query_execute", { connectionId, sql, database, queryId, record });
   },
 
   async cancelQuery(connectionId: string, queryId: number): Promise<void> {
     await invoke("query_cancel", { connectionId, queryId });
+  },
+
+  // 查询历史
+  async listHistory(connectionId: string, limit?: number): Promise<HistoryEntry[]> {
+    return await invoke("history_list", { connectionId, limit });
+  },
+
+  async deleteHistory(id: string): Promise<void> {
+    await invoke("history_delete", { id });
+  },
+
+  async clearHistory(connectionId: string): Promise<void> {
+    await invoke("history_clear", { connectionId });
   },
 
   /** 事务批量执行写语句（数据网格编辑提交），返回总影响行数 */

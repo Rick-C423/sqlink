@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use crate::database::{DatabaseDriver, create_and_connect_driver};
+use crate::history::HistoryStore;
 use crate::models::*;
 use crate::store::ConnectionStore;
 
@@ -11,10 +12,12 @@ pub struct ConnectionPoolManager {
     connections: Arc<RwLock<HashMap<String, Arc<dyn DatabaseDriver>>>>,
     pub(crate) configs: Arc<RwLock<HashMap<String, ConnectionConfig>>>,
     store: Option<ConnectionStore>,
+    history: Option<HistoryStore>,
 }
 
 impl ConnectionPoolManager {
     pub fn new(config_dir: Option<PathBuf>) -> Self {
+        let history = config_dir.as_ref().map(|dir| HistoryStore::new(dir.clone()));
         let store = config_dir.and_then(|dir| {
             match ConnectionStore::new(dir) {
                 Ok(s) => Some(s),
@@ -28,6 +31,7 @@ impl ConnectionPoolManager {
             connections: Arc::new(RwLock::new(HashMap::new())),
             configs: Arc::new(RwLock::new(HashMap::new())),
             store,
+            history,
         }
     }
 
@@ -115,5 +119,46 @@ impl ConnectionPoolManager {
         self.require_store()?.save(&cfg)?;
         self.disconnect(&id).await.ok();
         Ok(())
+    }
+
+    // ---------- 查询历史 ----------
+
+    /// 记录一条执行成功的查询（编辑器手动执行的才进来）
+    pub fn record_history(&self, connection_id: &str, database: Option<&str>, sql: &str, result: &QueryResult) {
+        let Some(history) = &self.history else { return };
+        let entry = HistoryEntry {
+            id: Uuid::new_v4().to_string(),
+            connection_id: connection_id.to_string(),
+            database: database.map(|d| d.to_string()),
+            sql: sql.to_string(),
+            executed_at: chrono::Utc::now().timestamp_millis(),
+            duration_ms: result.execution_time_ms,
+            row_count: result.rows_affected.or(result.total_count.map(|n| n as u64)),
+            truncated: result.truncated,
+        };
+        if let Err(e) = history.append(entry) {
+            eprintln!("记录查询历史失败: {}", e);
+        }
+    }
+
+    pub fn list_history(&self, connection_id: &str, limit: usize) -> Vec<HistoryEntry> {
+        self.history
+            .as_ref()
+            .map(|h| h.list(connection_id, limit))
+            .unwrap_or_default()
+    }
+
+    pub fn delete_history(&self, id: &str) -> Result<(), DatabaseError> {
+        self.history
+            .as_ref()
+            .ok_or_else(|| DatabaseError::Unknown("历史存储不可用".into()))?
+            .delete(id)
+    }
+
+    pub fn clear_history(&self, connection_id: &str) -> Result<(), DatabaseError> {
+        self.history
+            .as_ref()
+            .ok_or_else(|| DatabaseError::Unknown("历史存储不可用".into()))?
+            .clear(connection_id)
     }
 }
