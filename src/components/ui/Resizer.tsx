@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import { useT } from "@/i18n";
 
 interface ResizerProps {
   /** vertical = 竖条，拖动调左右宽度；horizontal = 横条，拖动调上下高度 */
@@ -13,6 +14,7 @@ interface ResizerProps {
  * 避免指针移出分隔条后样式闪断。
  */
 export function Resizer({ orientation, onDrag, onDoubleClick }: ResizerProps) {
+  const t = useT();
   const lastPos = useRef(0);
 
   const onMouseDown = useCallback(
@@ -45,7 +47,7 @@ export function Resizer({ orientation, onDrag, onDoubleClick }: ResizerProps) {
     <div
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
-      title="拖动调整大小，双击恢复默认"
+      title={t("resizer.title")}
       className={`flex-shrink-0 transition-colors hover:bg-muted-foreground/40 ${
         orientation === "vertical" ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"
       }`}

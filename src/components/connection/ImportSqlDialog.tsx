@@ -4,26 +4,15 @@ import { tauriService } from "@/services/tauriService";
 import { ImportSummary } from "@/types/database";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FileCode2, Loader2 } from "lucide-react";
+import { useT } from "@/i18n";
 
 type OnConflict = "error" | "skip" | "overwrite";
 
-const CONFLICT_OPTIONS: { value: OnConflict; label: string; desc: string }[] = [
-  {
-    value: "error",
-    label: "报错中止（默认）",
-    desc: "遇到已存在的表由服务器报错，导入停止。适合导入到空库。",
-  },
-  {
-    value: "skip",
-    label: "跳过已存在的表",
-    desc: "已存在的表保留原结构和数据，跳过其建表语句；对应的 INSERT 仍会执行，可能产生主键冲突。",
-  },
-  {
-    value: "overwrite",
-    label: "覆盖已存在的表",
-    desc: "建表前先 DROP TABLE IF EXISTS —— 已存在表的结构和数据会被完全替换，不可恢复！",
-  },
-];
+const CONFLICT_OPTIONS = [
+  { value: "error", labelKey: "importSql.conflictError.label", descKey: "importSql.conflictError.desc" },
+  { value: "skip", labelKey: "importSql.conflictSkip.label", descKey: "importSql.conflictSkip.desc" },
+  { value: "overwrite", labelKey: "importSql.conflictOverwrite.label", descKey: "importSql.conflictOverwrite.desc" },
+] as const;
 
 interface ImportSqlDialogProps {
   open: boolean;
@@ -41,6 +30,7 @@ export function ImportSqlDialog({
   onClose,
   onImported,
 }: ImportSqlDialogProps) {
+  const t = useT();
   const [path, setPath] = useState("");
   const [onConflict, setOnConflict] = useState<OnConflict>("error");
   const [running, setRunning] = useState(false);
@@ -57,14 +47,14 @@ export function ImportSqlDialog({
   const pickFile = async () => {
     const selected = await open({
       multiple: false,
-      filters: [{ name: "SQL 转储", extensions: ["sql", "txt"] }],
+      filters: [{ name: t("importSql.filterName"), extensions: ["sql", "txt"] }],
     });
     if (typeof selected === "string") setPath(selected);
   };
 
   const handleImport = async () => {
     if (!path) {
-      setError("请先选择 SQL 文件");
+      setError(t("importSql.selectFirst"));
       return;
     }
     setRunning(true);
@@ -89,7 +79,7 @@ export function ImportSqlDialog({
         reset();
         onClose();
       }}
-      title={`导入 SQL 文件 → ${database}`}
+      title={t("importSql.title", { database })}
       footer={
         <>
           <Button
@@ -100,12 +90,12 @@ export function ImportSqlDialog({
               onClose();
             }}
           >
-            {summary ? "完成" : "取消"}
+            {summary ? t("importSql.done") : t("common.cancel")}
           </Button>
           {!summary && (
             <Button onClick={handleImport} disabled={running || !path}>
               {running && <Loader2 className="h-4 w-4 animate-spin" />}
-              开始导入
+              {t("importSql.start")}
             </Button>
           )}
         </>
@@ -115,26 +105,26 @@ export function ImportSqlDialog({
         {error && <Alert variant="destructive">{error}</Alert>}
         {summary && (
           <Alert>
-            导入完成：共 {summary.statements} 条语句，执行 {summary.executed} 条
-            {summary.skipped > 0 && `，跳过已存在表 ${summary.skipped} 条`}
+            {t("importSql.summary", { total: summary.statements, executed: summary.executed })}
+            {summary.skipped > 0 && t("importSql.summarySkipped", { skipped: summary.skipped })}
           </Alert>
         )}
 
         <div className="space-y-1.5">
-          <Label>SQL 文件</Label>
+          <Label>{t("importSql.fileLabel")}</Label>
           <div className="flex gap-2">
             <div className="flex-1 h-9 rounded-md border bg-muted/40 px-3 flex items-center text-sm truncate">
-              {path || <span className="text-muted-foreground">未选择文件</span>}
+              {path || <span className="text-muted-foreground">{t("importSql.noFile")}</span>}
             </div>
             <Button variant="outline" onClick={pickFile} disabled={running}>
               <FileCode2 className="h-4 w-4 mr-1.5" />
-              选择…
+              {t("importSql.choose")}
             </Button>
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label>表已存在时</Label>
+          <Label>{t("importSql.conflictLabel")}</Label>
           <div className="space-y-1.5">
             {CONFLICT_OPTIONS.map((opt) => (
               <label
@@ -151,18 +141,15 @@ export function ImportSqlDialog({
                   onChange={() => setOnConflict(opt.value)}
                 />
                 <span>
-                  <span className="font-medium">{opt.label}</span>
-                  <span className="block text-xs text-muted-foreground mt-0.5">{opt.desc}</span>
+                  <span className="font-medium">{t(opt.labelKey)}</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">{t(opt.descKey)}</span>
                 </span>
               </label>
             ))}
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground">
-          逐条执行，出错即中止并报告位置；大文件请耐心等待，窗口会暂时无响应属正常。
-          不支持 pg_dump 的 \connect 等 psql 元命令。
-        </p>
+        <p className="text-xs text-muted-foreground">{t("importSql.hint")}</p>
       </div>
     </Dialog>
   );

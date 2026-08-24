@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Dialog, Button, Input, Label, Select, Alert } from "@/components/ui";
 import { quoteIdent } from "@/lib/utils";
 import { tauriService } from "@/services/tauriService";
+import { useT } from "@/i18n";
 
 /** MySQL 常用字符集与对应排序规则（首项为默认） */
 const MYSQL_CHARSETS = ["utf8mb4", "utf8", "gbk", "latin1", "ascii"];
@@ -31,6 +32,7 @@ export function CreateDatabaseDialog({
   onClose,
   onCreated,
 }: CreateDatabaseDialogProps) {
+  const t = useT();
   const isPg = driverType === "postgres" || driverType === "postgresql";
   const isMssql = driverType === "sqlserver" || driverType === "mssql";
 
@@ -67,7 +69,7 @@ export function CreateDatabaseDialog({
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      setError("请输入数据库名");
+      setError(t("createDb.nameRequired"));
       return;
     }
     setLoading(true);
@@ -78,14 +80,14 @@ export function CreateDatabaseDialog({
       onCreated();
       onClose();
     } catch (err) {
-      setError(`创建失败: ${err}`);
+      setError(t("createDb.createFailed", { error: String(err) }));
     } finally {
       setLoading(false);
     }
   };
 
   const collationOptions = [
-    { value: "", label: "（服务器默认）" },
+    { value: "", label: t("createDb.serverDefault") },
     ...(MYSQL_COLLATIONS[charset] ?? []).map((c) => ({ value: c, label: c })),
   ];
 
@@ -96,7 +98,7 @@ export function CreateDatabaseDialog({
         reset();
         onClose();
       }}
-      title="新建数据库"
+      title={t("createDb.title")}
       footer={
         <>
           <Button
@@ -106,10 +108,10 @@ export function CreateDatabaseDialog({
               onClose();
             }}
           >
-            取消
+            {t("common.cancel")}
           </Button>
           <Button onClick={handleSubmit} loading={loading}>
-            创建
+            {t("createDb.create")}
           </Button>
         </>
       }
@@ -118,7 +120,7 @@ export function CreateDatabaseDialog({
         {error && <Alert variant="destructive">{error}</Alert>}
 
         <div className="space-y-1.5">
-          <Label htmlFor="db-name">数据库名</Label>
+          <Label htmlFor="db-name">{t("createDb.dbName")}</Label>
           <Input
             id="db-name"
             value={name}
@@ -133,7 +135,7 @@ export function CreateDatabaseDialog({
 
         {isPg ? (
           <div className="space-y-1.5">
-            <Label htmlFor="db-encoding">编码</Label>
+            <Label htmlFor="db-encoding">{t("createDb.encoding")}</Label>
             <Select
               id="db-encoding"
               value={encoding}
@@ -142,13 +144,11 @@ export function CreateDatabaseDialog({
             />
           </div>
         ) : isMssql ? (
-          <p className="text-xs text-muted-foreground">
-            SQL Server 使用服务器默认字符集/排序规则。
-          </p>
+          <p className="text-xs text-muted-foreground">{t("createDb.mssqlHint")}</p>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="db-charset">字符集</Label>
+              <Label htmlFor="db-charset">{t("createDb.charset")}</Label>
               <Select
                 id="db-charset"
                 value={charset}
@@ -160,7 +160,7 @@ export function CreateDatabaseDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="db-collation">排序规则</Label>
+              <Label htmlFor="db-collation">{t("createDb.collation")}</Label>
               <Select
                 id="db-collation"
                 value={collation}
@@ -173,7 +173,7 @@ export function CreateDatabaseDialog({
 
         {name.trim() && (
           <div className="space-y-1.5">
-            <Label>SQL 预览</Label>
+            <Label>{t("createDb.sqlPreview")}</Label>
             <pre className="rounded-md bg-muted px-3 py-2 text-xs font-mono whitespace-pre-wrap break-all">
               {buildSql()}
             </pre>

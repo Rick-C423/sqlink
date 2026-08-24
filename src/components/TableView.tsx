@@ -8,6 +8,7 @@ import { DataGrid } from "@/components/result/DataGrid";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Check, Filter, Loader2, Plus, RefreshCw, RotateCcw, Key, Undo2, X } from "lucide-react";
+import { useT } from "@/i18n";
 
 interface TableViewProps {
   connectionId: string;
@@ -21,6 +22,7 @@ type SubTab = "data" | "structure";
 
 /** 表视图：数据（可编辑/删除/新增） + 结构（可编辑的表结构设计器） */
 export function TableView({ connectionId, database, table }: TableViewProps) {
+  const t = useT();
   const [subTab, setSubTab] = useState<SubTab>("data");
 
   return (
@@ -37,7 +39,7 @@ export function TableView({ connectionId, database, table }: TableViewProps) {
             )}
             onClick={() => setSubTab(st)}
           >
-            {st === "data" ? "数据" : "结构"}
+            {st === "data" ? t("tableView.data") : t("tableView.structure")}
           </button>
         ))}
         <span className="ml-auto text-xs text-muted-foreground pr-2">
@@ -54,7 +56,7 @@ export function TableView({ connectionId, database, table }: TableViewProps) {
   );
 }
 
-const PAGE_SIZE_OPTIONS = [100, 500, 1000, 2000];
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
 
 // ---------- 行筛选 ----------
 
@@ -64,19 +66,19 @@ interface FilterRow {
   value: string;
 }
 
-/** 操作符定义：needsValue = false 时不显示值输入框 */
-const FILTER_OPS: { value: string; label: string; needsValue: boolean }[] = [
-  { value: "=", label: "=", needsValue: true },
-  { value: "!=", label: "≠", needsValue: true },
-  { value: ">", label: ">", needsValue: true },
-  { value: ">=", label: "≥", needsValue: true },
-  { value: "<", label: "<", needsValue: true },
-  { value: "<=", label: "≤", needsValue: true },
-  { value: "contains", label: "包含", needsValue: true },
-  { value: "not_contains", label: "不包含", needsValue: true },
-  { value: "is_null", label: "IS NULL", needsValue: false },
-  { value: "not_null", label: "IS NOT NULL", needsValue: false },
-];
+/** 操作符定义：needsValue = false 时不显示值输入框；labelKey 为 None 时直接用 value 作符号 */
+const FILTER_OPS = [
+  { value: "=", labelKey: null, needsValue: true },
+  { value: "!=", label: "≠", labelKey: null, needsValue: true },
+  { value: ">", labelKey: null, needsValue: true },
+  { value: ">=", label: "≥", labelKey: null, needsValue: true },
+  { value: "<", labelKey: null, needsValue: true },
+  { value: "<=", label: "≤", labelKey: null, needsValue: true },
+  { value: "contains", labelKey: "tableView.opContains", needsValue: true },
+  { value: "not_contains", labelKey: "tableView.opNotContains", needsValue: true },
+  { value: "is_null", label: "IS NULL", labelKey: null, needsValue: false },
+  { value: "not_null", label: "IS NOT NULL", labelKey: null, needsValue: false },
+] as const;
 
 /** 草稿筛选 → WHERE 子句（空筛选返回空串）。值经 sqlLiteral 转义，列名经 quoteIdent 引用 */
 function buildWhere(filters: FilterRow[], driverType: string): string {
@@ -113,12 +115,13 @@ function escapeLikeValue(v: string): string {
 }
 
 export function TableData({ connectionId, database, table, readonly }: TableViewProps) {
+  const t = useT();
   const [result, setResult] = useState<QueryResult | undefined>();
   const [editContext, setEditContext] = useState<EditContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState(20);
   const [totalRows, setTotalRows] = useState<number | null>(null);
   // 筛选：filters 是草稿，appliedFilters 才进入查询（点"应用"或回车生效）
   const [filters, setFilters] = useState<FilterRow[]>([]);
@@ -190,11 +193,14 @@ export function TableData({ connectionId, database, table, readonly }: TableView
   const totalPages =
     totalRows !== null ? Math.max(1, Math.ceil(totalRows / pageSize)) : 1;
 
+  const opLabel = (o: (typeof FILTER_OPS)[number]) =>
+    o.labelKey ? t(o.labelKey) : "label" in o ? o.label : o.value;
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {error && (
         <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">
-          加载失败: {error}
+          {t("common.loadFailed", { error })}
         </div>
       )}
 
@@ -223,7 +229,7 @@ export function TableData({ connectionId, database, table, readonly }: TableView
               >
                 {FILTER_OPS.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {opLabel(o)}
                   </option>
                 ))}
               </select>
@@ -231,7 +237,7 @@ export function TableData({ connectionId, database, table, readonly }: TableView
                 <input
                   className="h-5 w-24 px-1 text-xs bg-transparent focus:outline-none border-l"
                   value={f.value}
-                  placeholder="值"
+                  placeholder={t("tableView.filterValue")}
                   onChange={(e) => updateFilter(i, { value: e.target.value })}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") applyFilters(filters);
@@ -240,7 +246,7 @@ export function TableData({ connectionId, database, table, readonly }: TableView
               )}
               <button
                 className="text-gray-400 hover:text-red-500"
-                title="移除筛选"
+                title={t("tableView.removeFilter")}
                 onClick={() => applyFilters(filters.filter((_, idx) => idx !== i))}
               >
                 <X className="h-3 w-3" />
@@ -256,15 +262,15 @@ export function TableData({ connectionId, database, table, readonly }: TableView
           }
         >
           <Plus className="h-3 w-3" />
-          筛选
+          {t("tableView.addFilter")}
         </button>
         {filters.length > 0 && (
           <Button size="sm" className="h-5 px-2 text-xs" onClick={() => applyFilters(filters)}>
-            应用
+            {t("tableView.apply")}
           </Button>
         )}
         {appliedFilters.length > 0 && (
-          <span className="text-amber-600">已筛选 {appliedFilters.length} 个条件</span>
+          <span className="text-amber-600">{t("tableView.filtered", { count: appliedFilters.length })}</span>
         )}
       </div>
 
@@ -275,26 +281,28 @@ export function TableData({ connectionId, database, table, readonly }: TableView
       <div className="flex items-center gap-2 px-3 py-1 border-t text-xs text-muted-foreground">
         <Button variant="ghost" size="sm" className="h-6" onClick={load} disabled={loading}>
           {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-          <span className="ml-1">刷新</span>
+          <span className="ml-1">{t("common.refresh")}</span>
         </Button>
-        <span>{totalRows !== null ? `共 ${totalRows.toLocaleString()} 行` : "…"}</span>
+        <span>
+          {totalRows !== null
+            ? t("tableView.totalRows", { count: totalRows.toLocaleString() })
+            : "…"}
+        </span>
         <div className="ml-auto flex items-center gap-2">
-          <span>
-            第 {page} / {totalPages} 页
-          </span>
+          <span>{t("tableView.pageInfo", { page, total: totalPages })}</span>
           <button
             className="px-1.5 py-0.5 rounded border hover:bg-gray-100 disabled:opacity-40"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
-            ‹ 上一页
+            {t("tableView.prevPage")}
           </button>
           <button
             className="px-1.5 py-0.5 rounded border hover:bg-gray-100 disabled:opacity-40"
             disabled={page >= totalPages || loading}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           >
-            下一页 ›
+            {t("tableView.nextPage")}
           </button>
           <select
             className="h-6 rounded border bg-background px-1 text-xs"
@@ -306,7 +314,7 @@ export function TableData({ connectionId, database, table, readonly }: TableView
           >
             {PAGE_SIZE_OPTIONS.map((s) => (
               <option key={s} value={s}>
-                每页 {s}
+                {t("tableView.perPage", { size: s })}
               </option>
             ))}
           </select>
@@ -319,6 +327,7 @@ export function TableData({ connectionId, database, table, readonly }: TableView
 type StructTab = "columns" | "indexes" | "fks";
 
 function TableStructure({ connectionId, database, table }: TableViewProps) {
+  const t = useT();
   const [origCols, setOrigCols] = useState<ColumnDraft[]>([]);
   const [cols, setCols] = useState<ColumnDraft[]>([]);
   const [origIdxs, setOrigIdxs] = useState<IndexDraft[]>([]);
@@ -402,10 +411,10 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
     setError(null);
     try {
       await tauriService.executeBatch(connectionId, database, statements);
-      setNotice(`已执行 ${statements.length} 条 DDL`);
+      setNotice(t("tableView.ddlExecuted", { count: statements.length }));
       await load();
     } catch (err) {
-      setError(`提交失败: ${err}`);
+      setError(t("tableView.submitFailed", { error: String(err) }));
     } finally {
       setSubmitting(false);
     }
@@ -433,25 +442,25 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
             )}
             onClick={() => setStructTab(st)}
           >
-            {st === "columns" ? "列" : st === "indexes" ? "索引" : "外键"}
+            {st === "columns" ? t("tableView.columns") : st === "indexes" ? t("tableView.indexes") : t("tableView.fks")}
           </button>
         ))}
         {statements.length > 0 && (
-          <span className="text-amber-600 font-medium ml-2">{statements.length} 处待提交</span>
+          <span className="text-amber-600 font-medium ml-2">{t("grid.pending", { count: statements.length })}</span>
         )}
         <div className="ml-auto flex items-center gap-1.5">
           {statements.length > 0 && (
             <>
               <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowSql(!showSql)}>
-                {showSql ? "隐藏 SQL" : "预览 SQL"}
+                {showSql ? t("tableView.hideSql") : t("tableView.previewSql")}
               </Button>
               <Button size="sm" className="h-6 text-xs" onClick={handleSubmit} disabled={submitting}>
                 {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
-                提交
+                {t("grid.submit")}
               </Button>
               <Button variant="outline" size="sm" className="h-6 text-xs" onClick={load} disabled={submitting}>
                 <RotateCcw className="h-3 w-3 mr-1" />
-                放弃
+                {t("grid.discard")}
               </Button>
             </>
           )}
@@ -463,8 +472,8 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
 
       {/* 常用类型下拉建议（仍可自由输入） */}
       <datalist id="datatype-list-structure">
-        {dataTypes.map((t) => (
-          <option key={t} value={t} />
+        {dataTypes.map((dt) => (
+          <option key={dt} value={dt} />
         ))}
       </datalist>
 
@@ -484,7 +493,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
         <div className="flex-1 overflow-auto custom-scrollbar">
           {/* 列 */}
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-semibold text-muted-foreground">列</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t("tableView.columns")}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -507,19 +516,19 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
               }
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增列
+              {t("tableView.addColumn")}
             </Button>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className={thCls}>列名</th>
-                <th className={thCls}>类型</th>
-                <th className={cn(thCls, "text-center w-14")}>可空</th>
-                <th className={thCls}>默认值</th>
-                {isMysql && <th className={cn(thCls, "text-center w-20")}>自增</th>}
-                <th className={cn(thCls, "text-center w-14")}>主键</th>
-                <th className={thCls}>注释</th>
+                <th className={thCls}>{t("tableView.thName")}</th>
+                <th className={thCls}>{t("tableView.thType")}</th>
+                <th className={cn(thCls, "text-center w-14")}>{t("tableView.thNullable")}</th>
+                <th className={thCls}>{t("tableView.thDefault")}</th>
+                {isMysql && <th className={cn(thCls, "text-center w-20")}>{t("tableView.thAutoInc")}</th>}
+                <th className={cn(thCls, "text-center w-14")}>{t("tableView.thPk")}</th>
+                <th className={thCls}>{t("tableView.thComment")}</th>
                 <th className={cn(thCls, "text-center w-12")}></th>
               </tr>
             </thead>
@@ -550,7 +559,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                       <input
                         className={inputCls}
                         value={c.name}
-                        placeholder="列名"
+                        placeholder={t("tableView.thName")}
                         disabled={c.deleted}
                         onChange={(e) => updateCol(i, { name: e.target.value })}
                       />
@@ -559,7 +568,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                       <input
                         className={inputCls}
                         value={c.dataType}
-                        placeholder="类型"
+                        placeholder={t("tableView.thType")}
                         list="datatype-list-structure"
                         disabled={c.deleted}
                         onChange={(e) => updateCol(i, { dataType: e.target.value })}
@@ -583,13 +592,13 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                         >
                           <option value="null">(NULL)</option>
                           <option value="empty">(EMPTY)</option>
-                          <option value="value">自定义</option>
+                          <option value="value">{t("tableView.customDefault")}</option>
                         </select>
                         {c.defaultKind === "value" && (
                           <input
                             className={inputCls}
                             value={c.defaultValue}
-                            placeholder="如 0、now()、'abc'"
+                            placeholder={t("tableView.defaultPlaceholder")}
                             disabled={c.deleted}
                             onChange={(e) => updateCol(i, { defaultValue: e.target.value })}
                           />
@@ -618,14 +627,14 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                       <input
                         className={inputCls}
                         value={c.comment}
-                        placeholder="注释"
+                        placeholder={t("tableView.thComment")}
                         disabled={c.deleted}
                         onChange={(e) => updateCol(i, { comment: e.target.value })}
                       />
                     </td>
                     <td className={cn(tdCls, "text-center")}>
                       <button
-                        title={c.deleted ? "恢复" : "删除列"}
+                        title={c.deleted ? t("tableView.restore") : t("tableView.deleteColumn")}
                         onClick={() => updateCol(i, { deleted: !c.deleted })}
                       >
                         {c.deleted ? (
@@ -645,7 +654,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
         <div className="flex-1 overflow-auto custom-scrollbar">
           {/* 索引 */}
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-semibold text-muted-foreground">索引</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t("tableView.indexes")}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -658,15 +667,15 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
               }
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增索引
+              {t("tableView.addIndex")}
             </Button>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className={thCls}>索引名</th>
-                <th className={thCls}>列（逗号分隔）</th>
-                <th className={cn(thCls, "text-center w-14")}>唯一</th>
+                <th className={thCls}>{t("tableView.thIndexName")}</th>
+                <th className={thCls}>{t("tableView.thIndexCols")}</th>
+                <th className={cn(thCls, "text-center w-14")}>{t("tableView.thUnique")}</th>
                 <th className={cn(thCls, "text-center w-12")}></th>
               </tr>
             </thead>
@@ -684,7 +693,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                       <input
                         className={inputCls}
                         value={idx.name}
-                        placeholder="索引名"
+                        placeholder={t("tableView.thIndexName")}
                         disabled={idx.deleted}
                         onChange={(e) =>
                           setIdxs((prev) => prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
@@ -724,10 +733,10 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                   </td>
                   <td className={cn(tdCls, "text-center")}>
                     {idx.isPrimary ? (
-                      <span className="text-xs text-gray-400">主键</span>
+                      <span className="text-xs text-gray-400">{t("tableView.thPk")}</span>
                     ) : (
                       <button
-                        title={idx.deleted ? "恢复" : "删除索引"}
+                        title={idx.deleted ? t("tableView.restore") : t("tableView.deleteIndex")}
                         onClick={() =>
                           setIdxs((prev) => prev.map((x, j) => (j === i ? { ...x, deleted: !x.deleted } : x)))
                         }
@@ -750,7 +759,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
           {/* 外键 */}
           <div className="flex items-center justify-between px-3 py-2">
             <span className="text-xs font-semibold text-muted-foreground">
-              外键（已有外键仅支持删除；修改请删旧建新）
+              {t("tableView.fkNote")}
             </span>
             <Button
               variant="ghost"
@@ -764,16 +773,16 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
               }
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增外键
+              {t("tableView.addFk")}
             </Button>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className={thCls}>约束名</th>
-                <th className={thCls}>本表列</th>
-                <th className={thCls}>引用表</th>
-                <th className={thCls}>引用列</th>
+                <th className={thCls}>{t("tableView.thConstraint")}</th>
+                <th className={thCls}>{t("tableView.thColumns")}</th>
+                <th className={thCls}>{t("tableView.thRefTable")}</th>
+                <th className={thCls}>{t("tableView.thRefColumns")}</th>
                 <th className={cn(thCls, "w-28")}>ON DELETE</th>
                 <th className={cn(thCls, "w-28")}>ON UPDATE</th>
                 <th className={cn(thCls, "text-center w-12")}></th>
@@ -783,7 +792,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
               {fks.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    暂无外键
+                    {t("tableView.noFks")}
                   </td>
                 </tr>
               )}
@@ -797,7 +806,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                     disabled={!fk.isNew || fk.deleted}
                     onChange={(e) => onChange(e.target.value)}
                   >
-                    <option value="">（默认）</option>
+                    <option value="">{t("tableView.defaultRule")}</option>
                     <option value="CASCADE">CASCADE</option>
                     <option value="SET NULL">SET NULL</option>
                     <option value="RESTRICT">RESTRICT</option>
@@ -843,7 +852,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                         <input
                           className={inputCls}
                           value={fk.refTable}
-                          placeholder="引用表"
+                          placeholder={t("tableView.thRefTable")}
                           disabled={fk.deleted}
                           onChange={(e) => updateFk({ refTable: e.target.value })}
                         />
@@ -880,7 +889,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                     </td>
                     <td className={cn(tdCls, "text-center")}>
                       <button
-                        title={fk.deleted ? "恢复" : "删除外键"}
+                        title={fk.deleted ? t("tableView.restore") : t("tableView.deleteFk")}
                         onClick={() => updateFk({ deleted: !fk.deleted })}
                       >
                         {fk.deleted ? (
@@ -902,7 +911,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
       <div className="flex items-center gap-2 px-3 py-1 border-t text-xs text-muted-foreground">
         <Button variant="ghost" size="sm" className="h-6" onClick={load} disabled={loading}>
           {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-          <span className="ml-1">刷新</span>
+          <span className="ml-1">{t("common.refresh")}</span>
         </Button>
         <span className="text-muted-foreground/60">
           {database} / {table}

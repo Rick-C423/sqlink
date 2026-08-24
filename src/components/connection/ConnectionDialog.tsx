@@ -5,6 +5,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { Button, Input, Label, Select, Dialog, Alert } from "@/components/ui";
 import { Database, TestTube } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { useT } from "@/i18n";
 
 interface ConnectionDialogProps {
   open: boolean;
@@ -42,15 +43,16 @@ const DEFAULT_CONFIG: ConnectionConfig = {
 };
 
 const COLOR_OPTIONS = [
-  { value: "gray", label: "灰", className: "bg-gray-400" },
-  { value: "red", label: "红", className: "bg-red-500" },
-  { value: "orange", label: "橙", className: "bg-orange-500" },
-  { value: "green", label: "绿", className: "bg-green-500" },
-  { value: "blue", label: "蓝", className: "bg-blue-500" },
-  { value: "purple", label: "紫", className: "bg-purple-500" },
-];
+  { value: "gray", labelKey: "connDialog.color.gray", className: "bg-gray-400" },
+  { value: "red", labelKey: "connDialog.color.red", className: "bg-red-500" },
+  { value: "orange", labelKey: "connDialog.color.orange", className: "bg-orange-500" },
+  { value: "green", labelKey: "connDialog.color.green", className: "bg-green-500" },
+  { value: "blue", labelKey: "connDialog.color.blue", className: "bg-blue-500" },
+  { value: "purple", labelKey: "connDialog.color.purple", className: "bg-purple-500" },
+] as const;
 
 export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogProps) {
+  const t = useT();
   const [config, setConfig] = useState<ConnectionConfig>(DEFAULT_CONFIG);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -87,9 +89,9 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
     setTestResult(null);
     try {
       await tauriService.testConnection(config);
-      setTestResult({ success: true, message: "连接测试成功！" });
+      setTestResult({ success: true, message: t("connDialog.testSuccess") });
     } catch (error) {
-      setTestResult({ success: false, message: `连接失败: ${error}` });
+      setTestResult({ success: false, message: t("connDialog.connectFailed", { error: String(error) }) });
     }
     setTesting(false);
   };
@@ -116,7 +118,12 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
       setTestResult(null);
       onClose();
     } catch (error) {
-      setTestResult({ success: false, message: `${isEditMode ? "保存" : "连接"}失败: ${error}` });
+      setTestResult({
+        success: false,
+        message: t(isEditMode ? "connDialog.saveFailed" : "connDialog.connectFailed", {
+          error: String(error),
+        }),
+      });
     }
     setConnecting(false);
   };
@@ -125,19 +132,19 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
     <Dialog
       open={open}
       onClose={onClose}
-      title={isEditMode ? "编辑数据库连接" : "新建数据库连接"}
+      title={isEditMode ? t("connDialog.editTitle") : t("connDialog.newTitle")}
       footer={
         <>
           <Button variant="outline" onClick={onClose}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="outline" onClick={handleTest} loading={testing} disabled={!isValid}>
             <TestTube className="mr-2 h-4 w-4" />
-            测试连接
+            {t("connDialog.test")}
           </Button>
           <Button onClick={handleConnect} loading={connecting} disabled={!isValid}>
             <Database className="mr-2 h-4 w-4" />
-            {isEditMode ? "保存修改" : "保存并连接"}
+            {isEditMode ? t("connDialog.save") : t("connDialog.saveAndConnect")}
           </Button>
         </>
       }
@@ -150,16 +157,16 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
         )}
 
         <div className="space-y-2">
-          <Label>连接名称</Label>
+          <Label>{t("connDialog.name")}</Label>
           <Input
-            placeholder="例如: 本地 MySQL"
+            placeholder={t("connDialog.namePlaceholder")}
             value={config.name}
             onChange={(e) => updateField("name", e.target.value)}
           />
         </div>
 
         <div className="space-y-2">
-          <Label>数据库类型</Label>
+          <Label>{t("connDialog.driverType")}</Label>
           <Select
             options={DRIVER_OPTIONS}
             value={config.driverType}
@@ -176,11 +183,11 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
 
         {isSqlite ? (
           <div className="space-y-2">
-            <Label>数据库文件</Label>
+            <Label>{t("connDialog.dbFile")}</Label>
             <div className="flex gap-2">
               <Input
                 className="flex-1"
-                placeholder="选择或输入 .db / .sqlite 文件路径（不存在则创建）"
+                placeholder={t("connDialog.dbFilePlaceholder")}
                 value={config.database ?? ""}
                 onChange={(e) => updateField("database", e.target.value)}
               />
@@ -191,25 +198,23 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
                   const selected = await openFileDialog({
                     multiple: false,
                     filters: [
-                      { name: "SQLite 数据库", extensions: ["db", "sqlite", "sqlite3"] },
-                      { name: "所有文件", extensions: ["*"] },
+                      { name: t("connDialog.sqliteFilter"), extensions: ["db", "sqlite", "sqlite3"] },
+                      { name: t("connDialog.allFiles"), extensions: ["*"] },
                     ],
                   });
                   if (typeof selected === "string") updateField("database", selected);
                 }}
               >
-                浏览…
+                {t("connDialog.browse")}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              SQLite 是本地文件数据库，无需主机/账号；路径不存在时会创建新库。
-            </p>
+            <p className="text-xs text-muted-foreground">{t("connDialog.sqliteHint")}</p>
           </div>
         ) : (
           <>
             <div className="grid grid-cols-3 gap-4">
               <div className="col-span-2 space-y-2">
-                <Label>主机</Label>
+                <Label>{t("connDialog.host")}</Label>
                 <Input
                   placeholder="localhost"
                   value={config.host}
@@ -217,7 +222,7 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
                 />
               </div>
               <div className="space-y-2">
-                <Label>端口</Label>
+                <Label>{t("connDialog.port")}</Label>
                 <Input
                   type="number"
                   value={config.port}
@@ -227,7 +232,7 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
             </div>
 
             <div className="space-y-2">
-              <Label>用户名</Label>
+              <Label>{t("connDialog.user")}</Label>
               <Input
                 placeholder={config.driverType === "sqlserver" ? "sa" : "root"}
                 value={config.user}
@@ -236,19 +241,19 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
             </div>
 
             <div className="space-y-2">
-              <Label>密码</Label>
+              <Label>{t("connDialog.password")}</Label>
               <Input
                 type="password"
-                placeholder={isEditMode ? "留空表示保持不变" : ""}
+                placeholder={isEditMode ? t("connDialog.passwordKeep") : ""}
                 value={config.password}
                 onChange={(e) => updateField("password", e.target.value)}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>数据库</Label>
+              <Label>{t("connDialog.database")}</Label>
               <Input
-                placeholder="可选，留空显示所有数据库"
+                placeholder={t("connDialog.databasePlaceholder")}
                 value={config.database}
                 onChange={(e) => updateField("database", e.target.value)}
               />
@@ -257,13 +262,13 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
         )}
 
         <div className="space-y-2">
-          <Label>颜色标记</Label>
+          <Label>{t("connDialog.colorMark")}</Label>
           <div className="flex items-center gap-1.5 h-9">
             {COLOR_OPTIONS.map((c) => (
               <button
                 key={c.value}
                 type="button"
-                title={c.label}
+                title={t(c.labelKey)}
                 onClick={() => updateField("color", c.value)}
                 className={`w-6 h-6 rounded-full ${c.className} ${
                   config.color === c.value
@@ -282,7 +287,7 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
             checked={config.savePassword}
             onChange={(e) => updateField("savePassword", e.target.checked)}
           />
-          <Label htmlFor="savePassword" className="cursor-pointer">记住密码</Label>
+          <Label htmlFor="savePassword" className="cursor-pointer">{t("connDialog.rememberPassword")}</Label>
         </div>
       </div>
     </Dialog>

@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { Button } from "@/components/ui";
 import { cn, commonDataTypes } from "@/lib/utils";
 import { Check, Loader2, Plus, Undo2, X } from "lucide-react";
+import { useT } from "@/i18n";
 
 interface CreateTableViewProps {
   connectionId: string;
@@ -18,6 +19,7 @@ type StructTab = "columns" | "indexes" | "fks";
 
 /** 新建表设计器：列 / 索引 / 外键 + SQL 预览，提交后刷新连接树并打开新表 */
 export function CreateTableView({ connectionId, database, tabId }: CreateTableViewProps) {
+  const t = useT();
   const driverType =
     useConnectionStore.getState().saved.find((c) => c.id === connectionId)?.driverType ?? "mysql";
   const isMysql = driverType === "mysql";
@@ -52,10 +54,10 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
     setCols((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
   const validate = (): string | null => {
-    if (!tableName.trim()) return "请输入表名";
-    if (liveCols.length === 0) return "至少需要一列";
+    if (!tableName.trim()) return t("createTable.nameRequired");
+    if (liveCols.length === 0) return t("createTable.needColumn");
     const names = liveCols.map((c) => c.name.trim().toLowerCase());
-    if (new Set(names).size !== names.length) return "存在重复的列名";
+    if (new Set(names).size !== names.length) return t("createTable.dupColumn");
     return null;
   };
 
@@ -76,11 +78,11 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
       const cs = useConnectionStore.getState();
       cs.updateNodeChildren(
         dbNodeId,
-        tables.map((t) => ({
-          id: `${dbNodeId}::table::${t.name}`,
+        tables.map((tb) => ({
+          id: `${dbNodeId}::table::${tb.name}`,
           type: "table" as const,
-          name: t.name,
-          metadata: { rowCount: t.rowCount },
+          name: tb.name,
+          metadata: { rowCount: tb.rowCount },
         }))
       );
       cs.expandNode(dbNodeId);
@@ -90,7 +92,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
       ws.openTable(connectionId, database, tableName.trim());
       ws.close(tabId);
     } catch (err) {
-      setError(`创建失败: ${err}`);
+      setError(t("createTable.createFailed", { error: String(err) }));
     } finally {
       setSubmitting(false);
     }
@@ -110,17 +112,17 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
         <input
           className={cn(inputCls, "w-44 h-7")}
           value={tableName}
-          placeholder="表名"
+          placeholder={t("createTable.tableNamePlaceholder")}
           autoFocus
           onChange={(e) => setTableName(e.target.value)}
         />
         <input
           className={cn(inputCls, "w-36 h-7")}
           value={tableComment}
-          placeholder="表注释（可选）"
+          placeholder={t("createTable.commentPlaceholder")}
           onChange={(e) => setTableComment(e.target.value)}
         />
-        <span className="text-muted-foreground">在 {database} 中创建</span>
+        <span className="text-muted-foreground">{t("createTable.createIn", { database })}</span>
 
         {(["columns", "indexes", "fks"] as StructTab[]).map((st) => (
           <button
@@ -133,17 +135,21 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
             )}
             onClick={() => setStructTab(st)}
           >
-            {st === "columns" ? `列 (${liveCols.length})` : st === "indexes" ? `索引 (${idxs.filter((i) => !i.deleted).length})` : `外键 (${fks.filter((f) => !f.deleted).length})`}
+            {st === "columns"
+              ? t("createTable.columnsTab", { count: liveCols.length })
+              : st === "indexes"
+                ? t("createTable.indexesTab", { count: idxs.filter((i) => !i.deleted).length })
+                : t("createTable.fksTab", { count: fks.filter((f) => !f.deleted).length })}
           </button>
         ))}
 
         <div className="ml-auto flex items-center gap-1.5">
           <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowSql(!showSql)}>
-            {showSql ? "隐藏 SQL" : "预览 SQL"}
+            {showSql ? t("tableView.hideSql") : t("tableView.previewSql")}
           </Button>
           <Button size="sm" className="h-6 text-xs" onClick={handleSubmit} disabled={submitting || statements.length === 0}>
             {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
-            创建表
+            {t("createTable.createTable")}
           </Button>
         </div>
       </div>
@@ -153,14 +159,14 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
       )}
       {showSql && (
         <pre className="px-3 py-2 text-xs bg-gray-900 text-green-300 border-b overflow-auto max-h-40">
-          {statements.length > 0 ? statements.join("\n") : "-- 输入表名和列后自动生成 CREATE TABLE"}
+          {statements.length > 0 ? statements.join("\n") : t("createTable.sqlPlaceholder")}
         </pre>
       )}
 
       {structTab === "columns" ? (
         <div className="flex-1 overflow-auto custom-scrollbar">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-semibold text-muted-foreground">列</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t("tableView.columns")}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -183,19 +189,19 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
               }
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增列
+              {t("tableView.addColumn")}
             </Button>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className={thCls}>列名</th>
-                <th className={thCls}>类型</th>
-                <th className={cn(thCls, "text-center w-14")}>可空</th>
-                <th className={thCls}>默认值</th>
-                {isMysql && <th className={cn(thCls, "text-center w-20")}>自增</th>}
-                <th className={cn(thCls, "text-center w-14")}>主键</th>
-                <th className={thCls}>注释</th>
+                <th className={thCls}>{t("tableView.thName")}</th>
+                <th className={thCls}>{t("tableView.thType")}</th>
+                <th className={cn(thCls, "text-center w-14")}>{t("tableView.thNullable")}</th>
+                <th className={thCls}>{t("tableView.thDefault")}</th>
+                {isMysql && <th className={cn(thCls, "text-center w-20")}>{t("tableView.thAutoInc")}</th>}
+                <th className={cn(thCls, "text-center w-14")}>{t("tableView.thPk")}</th>
+                <th className={thCls}>{t("tableView.thComment")}</th>
                 <th className={cn(thCls, "text-center w-12")}></th>
               </tr>
             </thead>
@@ -209,7 +215,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                     <input
                       className={inputCls}
                       value={c.name}
-                      placeholder="列名"
+                      placeholder={t("tableView.thName")}
                       disabled={c.deleted}
                       onChange={(e) => updateCol(i, { name: e.target.value })}
                     />
@@ -218,7 +224,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                     <input
                       className={inputCls}
                       value={c.dataType}
-                      placeholder="类型"
+                      placeholder={t("tableView.thType")}
                       list="datatype-list-create"
                       disabled={c.deleted}
                       onChange={(e) => updateCol(i, { dataType: e.target.value })}
@@ -242,13 +248,13 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                       >
                         <option value="null">(NULL)</option>
                         <option value="empty">(EMPTY)</option>
-                        <option value="value">自定义</option>
+                        <option value="value">{t("tableView.customDefault")}</option>
                       </select>
                       {c.defaultKind === "value" && (
                         <input
                           className={inputCls}
                           value={c.defaultValue}
-                          placeholder="如 0、now()、'abc'"
+                          placeholder={t("tableView.defaultPlaceholder")}
                           disabled={c.deleted}
                           onChange={(e) => updateCol(i, { defaultValue: e.target.value })}
                         />
@@ -277,13 +283,13 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                     <input
                       className={inputCls}
                       value={c.comment}
-                      placeholder="注释"
+                      placeholder={t("tableView.thComment")}
                       disabled={c.deleted}
                       onChange={(e) => updateCol(i, { comment: e.target.value })}
                     />
                   </td>
                   <td className={cn(tdCls, "text-center")}>
-                    <button title={c.deleted ? "恢复" : "删除列"} onClick={() => updateCol(i, { deleted: !c.deleted })}>
+                    <button title={c.deleted ? t("tableView.restore") : t("tableView.deleteColumn")} onClick={() => updateCol(i, { deleted: !c.deleted })}>
                       {c.deleted ? (
                         <Undo2 className="h-3.5 w-3.5 text-green-600 inline" />
                       ) : (
@@ -299,7 +305,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
       ) : structTab === "indexes" ? (
         <div className="flex-1 overflow-auto custom-scrollbar">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-semibold text-muted-foreground">索引（主键在"列"页勾选）</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t("createTable.indexNote")}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -307,15 +313,15 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
               onClick={() => setIdxs((prev) => [...prev, { name: "", columns: "", isUnique: false, isNew: true }])}
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增索引
+              {t("tableView.addIndex")}
             </Button>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className={thCls}>索引名（可留空自动命名）</th>
-                <th className={thCls}>列（逗号分隔）</th>
-                <th className={cn(thCls, "text-center w-14")}>唯一</th>
+                <th className={thCls}>{t("createTable.indexNameAuto")}</th>
+                <th className={thCls}>{t("tableView.thIndexCols")}</th>
+                <th className={cn(thCls, "text-center w-14")}>{t("tableView.thUnique")}</th>
                 <th className={cn(thCls, "text-center w-12")}></th>
               </tr>
             </thead>
@@ -323,7 +329,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
               {idxs.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    暂无索引
+                    {t("createTable.noIndexes")}
                   </td>
                 </tr>
               )}
@@ -363,7 +369,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                   </td>
                   <td className={cn(tdCls, "text-center")}>
                     <button
-                      title={idx.deleted ? "恢复" : "删除索引"}
+                      title={idx.deleted ? t("tableView.restore") : t("tableView.deleteIndex")}
                       onClick={() =>
                         setIdxs((prev) => prev.map((x, j) => (j === i ? { ...x, deleted: !x.deleted } : x)))
                       }
@@ -383,7 +389,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
       ) : (
         <div className="flex-1 overflow-auto custom-scrollbar">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-semibold text-muted-foreground">外键</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t("tableView.fks")}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -396,16 +402,16 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
               }
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增外键
+              {t("tableView.addFk")}
             </Button>
           </div>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className={thCls}>约束名（可留空）</th>
-                <th className={thCls}>本表列</th>
-                <th className={thCls}>引用表</th>
-                <th className={thCls}>引用列</th>
+                <th className={thCls}>{t("createTable.constraintOptional")}</th>
+                <th className={thCls}>{t("tableView.thColumns")}</th>
+                <th className={thCls}>{t("tableView.thRefTable")}</th>
+                <th className={thCls}>{t("tableView.thRefColumns")}</th>
                 <th className={cn(thCls, "w-28")}>ON DELETE</th>
                 <th className={cn(thCls, "w-28")}>ON UPDATE</th>
                 <th className={cn(thCls, "text-center w-12")}></th>
@@ -415,7 +421,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
               {fks.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-3 py-4 text-center text-xs text-muted-foreground">
-                    暂无外键
+                    {t("tableView.noFks")}
                   </td>
                 </tr>
               )}
@@ -429,7 +435,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                     disabled={fk.deleted}
                     onChange={(e) => onChange(e.target.value)}
                   >
-                    <option value="">（默认）</option>
+                    <option value="">{t("tableView.defaultRule")}</option>
                     <option value="CASCADE">CASCADE</option>
                     <option value="SET NULL">SET NULL</option>
                     <option value="RESTRICT">RESTRICT</option>
@@ -460,7 +466,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                       <input
                         className={inputCls}
                         value={fk.refTable}
-                        placeholder="引用表"
+                        placeholder={t("tableView.thRefTable")}
                         disabled={fk.deleted}
                         onChange={(e) => updateFk({ refTable: e.target.value })}
                       />
@@ -477,7 +483,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
                     <td className={tdCls}>{ruleSelect(fk.onDelete, (v) => updateFk({ onDelete: v }))}</td>
                     <td className={tdCls}>{ruleSelect(fk.onUpdate, (v) => updateFk({ onUpdate: v }))}</td>
                     <td className={cn(tdCls, "text-center")}>
-                      <button title={fk.deleted ? "恢复" : "删除外键"} onClick={() => updateFk({ deleted: !fk.deleted })}>
+                      <button title={fk.deleted ? t("tableView.restore") : t("tableView.deleteFk")} onClick={() => updateFk({ deleted: !fk.deleted })}>
                         {fk.deleted ? (
                           <Undo2 className="h-3.5 w-3.5 text-green-600 inline" />
                         ) : (
@@ -495,8 +501,8 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
 
       {/* 常用类型下拉建议（仍可自由输入） */}
       <datalist id="datatype-list-create">
-        {dataTypes.map((t) => (
-          <option key={t} value={t} />
+        {dataTypes.map((dt) => (
+          <option key={dt} value={dt} />
         ))}
       </datalist>
     </div>

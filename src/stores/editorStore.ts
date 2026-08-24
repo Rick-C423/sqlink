@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { EditContext, QueryResult } from "@/types/database";
+import { t } from "@/i18n";
 
 interface EditorTab {
   id: string;
@@ -38,7 +39,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const id = `tab_${Date.now()}`;
     const newTab: EditorTab = {
       id,
-      title: title || `查询 ${get().tabs.length + 1}`,
+      title: title || t("ws.queryN", { n: get().tabs.length + 1 }),
       content: content || "",
       isExecuting: false,
     };

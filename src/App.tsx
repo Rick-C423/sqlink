@@ -13,13 +13,15 @@ import { DatabaseOverview } from "@/components/DatabaseOverview";
 import { TableView } from "@/components/TableView";
 import { ViewView } from "@/components/ViewView";
 import { CreateTableView } from "@/components/CreateTableView";
-import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye } from "lucide-react";
+import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ContextMenu } from "@/components/ContextMenu";
 import { Resizer } from "@/components/ui/Resizer";
 import { useThemeStore } from "@/stores/themeStore";
+import { useI18nStore, useT } from "@/i18n";
 
 export default function App() {
+  const t = useT();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<ConnectionConfig | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -63,6 +65,9 @@ export default function App() {
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
 
+  const locale = useI18nStore((s) => s.locale);
+  const toggleLocale = useI18nStore((s) => s.toggleLocale);
+
   // 启动时加载已保存的连接
   useEffect(() => {
     tauriService
@@ -95,7 +100,7 @@ export default function App() {
 
   const handleExecute = async (sql: string, editorTabId: string) => {
     if (!activeConnection || !selectedDatabase) {
-      setError("请先在左侧选择要查询的数据库");
+      setError(t("app.selectDatabaseFirst"));
       return;
     }
     setError(null);
@@ -139,7 +144,7 @@ export default function App() {
         error: String(err),
       };
       setTabResult(editorTabId, errorResult);
-      setError(`执行失败: ${err}`);
+      setError(t("app.executeFailed", { error: String(err) }));
     } finally {
       setTabExecuting(editorTabId, false);
     }
@@ -149,7 +154,7 @@ export default function App() {
     const tab = useEditorStore.getState().tabs.find((t) => t.id === editorTabId);
     if (activeConnection && tab?.queryId !== undefined) {
       tauriService.cancelQuery(activeConnection, tab.queryId).catch((err) => {
-        setError(`取消失败: ${err}`);
+        setError(t("app.cancelFailed", { error: String(err) }));
       });
     }
   };
@@ -167,7 +172,7 @@ export default function App() {
   /** 执行全部：整页 SQL 拆成多条语句，批量执行（DDL 脚本用） */
   const handleExecuteAll = async (statements: string[], editorTabId: string) => {
     if (!activeConnection || !selectedDatabase) {
-      setError("请先在左侧选择要查询的数据库");
+      setError(t("app.selectDatabaseFirst"));
       return;
     }
     setError(null);
@@ -188,7 +193,7 @@ export default function App() {
         executionTimeMs: Date.now() - started,
         error: String(err),
       });
-      setError(`批量执行失败: ${err}`);
+      setError(t("app.batchFailed", { error: String(err) }));
     } finally {
       setTabExecuting(editorTabId, false);
     }
@@ -252,13 +257,13 @@ export default function App() {
             </div>
           )}
 
-          {/* 工作台 tab 条：左侧栏开关，右侧主题/连接状态 */}
+          {/* 工作台 tab 条：左侧栏开关，右侧主题/语言/连接状态 */}
           <div className="flex items-center border-b bg-muted/30 flex-shrink-0">
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7 mx-1 flex-shrink-0"
-              title={sidebarVisible ? "收起侧栏" : "展开侧栏"}
+              title={sidebarVisible ? t("app.collapseSidebar") : t("app.expandSidebar")}
               onClick={() => setSidebarVisible(!sidebarVisible)}
             >
               {sidebarVisible ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -268,7 +273,7 @@ export default function App() {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-6 flex-shrink-0"
-                title="向左移动"
+                title={t("app.scrollLeft")}
                 onClick={() => tabBarRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -319,7 +324,7 @@ export default function App() {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-6 flex-shrink-0"
-                title="向右移动"
+                title={t("app.scrollRight")}
                 onClick={() => tabBarRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
               >
                 <ChevronRight className="h-4 w-4" />
@@ -329,10 +334,10 @@ export default function App() {
               variant="ghost"
               size="icon"
               className="h-7 w-7 flex-shrink-0"
-              title="新建查询"
+              title={t("app.newQuery")}
               onClick={() => {
                 if (activeConnection) openQuery(activeConnection);
-                else setError("请先在左侧选择一个连接");
+                else setError(t("app.selectConnectionFirst"));
               }}
             >
               <Plus className="h-4 w-4" />
@@ -341,10 +346,20 @@ export default function App() {
               variant="ghost"
               size="icon"
               className="h-7 w-7 flex-shrink-0"
-              title={theme === "dark" ? "切换浅色主题" : "切换深色主题"}
+              title={theme === "dark" ? t("app.toLightTheme") : t("app.toDarkTheme")}
               onClick={toggleTheme}
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 flex-shrink-0 text-xs"
+              title={t("app.switchLanguage")}
+              onClick={toggleLocale}
+            >
+              <Languages className="h-4 w-4 mr-1" />
+              {locale === "zh-CN" ? "EN" : "中"}
             </Button>
             {activeConnection && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground px-3 flex-shrink-0">
@@ -360,14 +375,14 @@ export default function App() {
           {wsTabs.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
               <Database className="h-12 w-12 mb-3 opacity-30" />
-              <p className="text-sm">在左侧连接树中点击数据库查看表清单，点击表查看数据与结构</p>
+              <p className="text-sm">{t("app.emptyHint")}</p>
               <p className="text-xs mt-1 opacity-70">
-                或{" "}
+                {t("app.emptyOr")}{" "}
                 <button
                   className="text-blue-600 hover:underline"
                   onClick={() => activeConnection && openQuery(activeConnection)}
                 >
-                  新建查询
+                  {t("app.newQuery")}
                 </button>
               </p>
             </div>
@@ -425,11 +440,11 @@ export default function App() {
           y={tabMenu.y}
           items={[
             {
-              label: "关闭",
+              label: t("app.closeTab"),
               onClick: () => closeWs(tabMenu.tabId),
             },
             {
-              label: "关闭其他",
+              label: t("app.closeOthers"),
               onClick: () => {
                 useWorkspaceStore
                   .getState()
@@ -438,7 +453,7 @@ export default function App() {
               },
             },
             {
-              label: "关闭全部",
+              label: t("app.closeAll"),
               onClick: () => {
                 useWorkspaceStore
                   .getState()

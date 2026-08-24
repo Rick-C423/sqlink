@@ -8,6 +8,7 @@ import { Play, Square, Loader2, FastForward, History, Trash2, X } from "lucide-r
 import { Button } from "@/components/ui";
 import { tauriService } from "@/services/tauriService";
 import type { HistoryEntry } from "@/types/database";
+import { useT } from "@/i18n";
 
 // 配置 Monaco Editor loader
 loader.config({ monaco });
@@ -142,7 +143,8 @@ interface SQLEditorProps {
 }
 
 export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, onCancel }: SQLEditorProps) {
-  const tab = useEditorStore((s) => s.tabs.find((t) => t.id === tabId));
+  const t = useT();
+  const tab = useEditorStore((s) => s.tabs.find((tb) => tb.id === tabId));
   const theme = useThemeStore((s) => s.theme);
   const updateTabContent = useEditorStore((s) => s.updateTabContent);
 
@@ -193,14 +195,14 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
 
   const handleClearHistory = useCallback(async () => {
     if (!connectionId) return;
-    if (!window.confirm("清空当前连接的全部查询历史？")) return;
+    if (!window.confirm(t("editor.confirmClearHistory"))) return;
     try {
       await tauriService.clearHistory(connectionId);
       setHistoryList([]);
     } catch {
       // ignore
     }
-  }, [connectionId]);
+  }, [connectionId, t]);
 
   /** 今天显示时分秒，跨天显示月-日 时:分 */
   const formatHistoryTime = (ts: number) => {
@@ -237,7 +239,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
 
     // 3) 兜底：整个 tab 内容
     if (!sql.trim()) {
-      sql = useEditorStore.getState().tabs.find((t) => t.id === tabId)?.content ?? "";
+      sql = useEditorStore.getState().tabs.find((tb) => tb.id === tabId)?.content ?? "";
     }
 
     const trimmed = sql.trim();
@@ -264,7 +266,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
   if (!tab) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        查询页已被关闭
+        {t("editor.closed")}
       </div>
     );
   }
@@ -276,7 +278,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
         {isExecuting ? (
           <Button size="sm" variant="destructive" onClick={() => onCancel(tabId)} className="h-7">
             <Square className="mr-1.5 h-3.5 w-3.5" />
-            取消查询
+            {t("editor.cancelQuery")}
           </Button>
         ) : (
           <Button
@@ -286,7 +288,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             className="h-7"
           >
             <Play className="mr-1.5 h-3.5 w-3.5" />
-            执行 (Ctrl+Enter)
+            {t("editor.run")}
           </Button>
         )}
         {onExecuteAll && (
@@ -295,7 +297,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             variant="outline"
             disabled={!connectionId || isExecuting}
             className="h-7"
-            title="把整页 SQL 按分号拆分，逐条批量执行"
+            title={t("editor.runAllTitle")}
             onClick={() => {
               const content = editorRef.current?.getModel()?.getValue() ?? tab?.content ?? "";
               const stmts = splitStatements(content);
@@ -303,7 +305,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             }}
           >
             <FastForward className="mr-1.5 h-3.5 w-3.5" />
-            执行全部
+            {t("editor.runAll")}
           </Button>
         )}
         <Button
@@ -311,19 +313,19 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
           variant="outline"
           disabled={!connectionId}
           className={`h-7${historyOpen ? " bg-muted" : ""}`}
-          title="查询历史"
+          title={t("editor.historyTitle")}
           onClick={() => setHistoryOpen((v) => !v)}
         >
           <History className="mr-1.5 h-3.5 w-3.5" />
-          历史
+          {t("editor.history")}
         </Button>
         {!connectionId && (
-          <span className="text-xs text-muted-foreground">请先连接数据库</span>
+          <span className="text-xs text-muted-foreground">{t("editor.connectFirst")}</span>
         )}
         {isExecuting && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         {tab.executionTime !== undefined && !isExecuting && (
           <span className="text-xs text-muted-foreground ml-auto">
-            耗时: {tab.executionTime}ms
+            {t("editor.elapsed", { ms: tab.executionTime })}
           </span>
         )}
       </div>
@@ -360,16 +362,16 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             {/* 面板头 */}
             <div className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0">
               <History className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs font-medium">查询历史</span>
+              <span className="text-xs font-medium">{t("editor.historyTitle")}</span>
               <span className="text-[10px] text-muted-foreground">
-                仅记录执行成功的语句
+                {t("editor.historyNote")}
               </span>
               <div className="ml-auto flex items-center gap-1">
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-6 px-1.5 text-xs text-muted-foreground"
-                  title="清空当前连接的历史"
+                  title={t("editor.clearHistoryTitle")}
                   onClick={handleClearHistory}
                   disabled={historyList.length === 0}
                 >
@@ -379,7 +381,7 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
                   size="sm"
                   variant="ghost"
                   className="h-6 px-1.5 text-xs"
-                  title="关闭"
+                  title={t("editor.close")}
                   onClick={() => setHistoryOpen(false)}
                 >
                   <X className="h-3 w-3" />
@@ -391,16 +393,16 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
             <div className="flex-1 overflow-y-auto">
               {historyList.length === 0 ? (
                 <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                  暂无历史记录
+                  {t("editor.noHistory")}
                   <br />
-                  执行成功的语句会自动记录在这里
+                  {t("editor.noHistoryHint")}
                 </div>
               ) : (
                 historyList.map((entry) => (
                   <div
                     key={entry.id}
                     className="group px-3 py-2 border-b border-border/50 hover:bg-muted/40 cursor-pointer"
-                    title="点击回填到编辑器"
+                    title={t("editor.clickToFill")}
                     onClick={() => fillFromHistory(entry.sql)}
                   >
                     <div className="font-mono text-xs leading-4 line-clamp-2 break-all">
@@ -410,11 +412,12 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
                       <span>{formatHistoryTime(entry.executedAt)}</span>
                       <span>{entry.durationMs}ms</span>
                       <span>
-                        {entry.rowCount ?? 0} 行{entry.truncated ? "(截断)" : ""}
+                        {t("editor.rows", { count: entry.rowCount ?? 0 })}
+                        {entry.truncated ? t("editor.truncatedMark") : ""}
                       </span>
                       <button
                         className="ml-auto opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-                        title="删除该条"
+                        title={t("editor.deleteEntry")}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteHistory(entry.id);

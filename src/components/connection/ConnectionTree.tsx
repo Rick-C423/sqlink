@@ -10,6 +10,8 @@ import { CreateDatabaseDialog } from "@/components/connection/CreateDatabaseDial
 import { ImportSqlDialog } from "@/components/connection/ImportSqlDialog";
 import { ExportSqlDialog } from "@/components/connection/ExportSqlDialog";
 import { save } from "@tauri-apps/plugin-dialog";
+import { useT } from "@/i18n";
+import type { MessageKey } from "@/i18n/zh-CN";
 import {
   ChevronRight,
   ChevronDown,
@@ -56,6 +58,7 @@ interface MenuState {
 }
 
 export function ConnectionTree({ onNewConnection, onEditConnection }: ConnectionTreeProps) {
+  const t = useT();
   const treeData = useConnectionStore((s) => s.treeData);
   const expandedNodes = useConnectionStore((s) => s.expandedNodes);
   const loadingNodes = useConnectionStore((s) => s.loadingNodes);
@@ -135,18 +138,18 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               tauriService.getTables(connectionId, dbName),
               tauriService.getViews(connectionId, dbName).catch(() => []),
             ]);
-            children = tables.map((t) => ({
-              id: `${node.id}::table::${t.name}`,
+            children = tables.map((tb) => ({
+              id: `${node.id}::table::${tb.name}`,
               type: "table" as const,
-              name: t.name,
-              metadata: { rowCount: t.rowCount },
+              name: tb.name,
+              metadata: { rowCount: tb.rowCount },
             }));
             // 有视图时追加「视图 (n)」分组节点，视图收在里面
             if (views.length > 0) {
               children.push({
                 id: `${node.id}::group::views`,
                 type: "folder" as const,
-                name: `视图 (${views.length})`,
+                name: t("tree.viewsGroup", { count: views.length }),
                 metadata: { isGroup: true, groupKind: "views" },
                 children: views.map((v) => ({
                   id: `${node.id}::view::${v.name}`,
@@ -168,7 +171,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               {
                 id: `${node.id}::folder::columns`,
                 type: "folder" as const,
-                name: `列 (${columns.length})`,
+                name: t("tree.columnsGroup", { count: columns.length }),
                 children: columns.map((col) => ({
                   id: `${node.id}::col::${col.name}`,
                   type: "column" as const,
@@ -195,7 +198,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               {
                 id: `${node.id}::folder::columns`,
                 type: "folder" as const,
-                name: `列 (${columns.length})`,
+                name: t("tree.columnsGroup", { count: columns.length }),
                 children: columns.map((col) => ({
                   id: `${node.id}::col::${col.name}`,
                   type: "column" as const,
@@ -206,7 +209,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               {
                 id: `${node.id}::folder::indexes`,
                 type: "folder" as const,
-                name: `索引 (${indexes.length})`,
+                name: t("tree.indexesGroup", { count: indexes.length }),
                 children: indexes.map((idx) => ({
                   id: `${node.id}::idx::${idx.name}`,
                   type: "index" as const,
@@ -223,11 +226,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         setNodeLoading(node.id, false);
       } catch (err) {
         console.error("Failed to load children:", err);
-        setError(`加载失败: ${err}`);
+        setError(t("tree.loadFailed", { error: String(err) }));
         setNodeLoading(node.id, false);
       }
     },
-    [loadingNodes, setNodeLoading, updateNodeChildren, getDriverType]
+    [loadingNodes, setNodeLoading, updateNodeChildren, getDriverType, t]
   );
 
   /** 刷新节点：清空子树并重新加载 */
@@ -270,11 +273,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         await loadChildren({ ...node, children: undefined });
       } catch (err) {
         console.error("Failed to connect:", err);
-        setError(`连接失败: ${err}`);
+        setError(t("tree.connectFailed", { error: String(err) }));
         setNodeLoading(node.id, false);
       }
     },
-    [loadingNodes, setNodeLoading, markLive, setActiveConnection, expandNode, loadChildren]
+    [loadingNodes, setNodeLoading, markLive, setActiveConnection, expandNode, loadChildren, t]
   );
 
   const handleDisconnect = useCallback(
@@ -292,16 +295,16 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
 
   const handleDelete = useCallback(
     async (connectionId: string) => {
-      if (!window.confirm("确定删除这个已保存的连接吗？")) return;
+      if (!window.confirm(t("tree.confirmDeleteConnection"))) return;
       try {
         await tauriService.deleteSaved(connectionId);
         removeSaved(connectionId);
       } catch (err) {
         console.error("Failed to delete:", err);
-        setError(`删除失败: ${err}`);
+        setError(t("tree.deleteFailed", { error: String(err) }));
       }
     },
-    [removeSaved]
+    [removeSaved, t]
   );
 
   const toggleExpand = useCallback(
@@ -373,7 +376,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
 
   /** 对表执行 DDL（重命名/清空/删除）并刷新库节点 */
   const runTableDdl = useCallback(
-    async (node: TreeNode, sql: string, actionName: string) => {
+    async (node: TreeNode, sql: string, failKey: MessageKey) => {
       const parts = node.id.split("::");
       const connId = parts[0];
       const dbName = parts[2];
@@ -382,10 +385,10 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         const dbNodeId = `${connId}::db::${dbName}`;
         refreshNode({ id: dbNodeId, type: "database", name: dbName });
       } catch (err) {
-        setError(`${actionName}失败: ${err}`);
+        setError(t(failKey, { error: String(err) }));
       }
     },
-    [refreshNode]
+    [refreshNode, t]
   );
 
   /** 删除数据库：DROP DATABASE 后刷新连接节点，并清除查询上下文 */
@@ -405,10 +408,10 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         }
         refreshNode({ id: connId, type: "connection", name: node.name });
       } catch (err) {
-        setError(`删除数据库失败: ${err}`);
+        setError(t("tree.dropDatabaseFailed", { error: String(err) }));
       }
     },
-    [getDriverType, activeConnection, selectedDatabase, setSelectedDatabase, refreshNode]
+    [getDriverType, activeConnection, selectedDatabase, setSelectedDatabase, refreshNode, t]
   );
 
   const buildMenuItems = (node: TreeNode): MenuItem[] => {
@@ -420,7 +423,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       const items: MenuItem[] = [];
       if (connected) {
         items.push({
-          label: "新建查询",
+          label: t("app.newQuery"),
           icon: <FileCode2 className="h-3.5 w-3.5" />,
           onClick: () => {
             setActiveConnection(node.id);
@@ -430,37 +433,37 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         // SQLite 是单文件库，新建数据库 = 新文件 = 新连接，不提供此入口
         if (cfg?.driverType !== "sqlite") {
           items.push({
-            label: "新建数据库",
+            label: t("tree.newDatabase"),
             icon: <Plus className="h-3.5 w-3.5" />,
             onClick: () => setCreateDbFor(node.id),
           });
         }
         items.push({
-          label: "断开连接",
+          label: t("tree.disconnect"),
           icon: <Unplug className="h-3.5 w-3.5" />,
           onClick: () => handleDisconnect(node.id),
         });
         items.push({
-          label: "刷新",
+          label: t("common.refresh"),
           icon: <RefreshCw className="h-3.5 w-3.5" />,
           onClick: () => refreshNode(node),
         });
       } else {
         items.push({
-          label: "连接",
+          label: t("tree.connect"),
           icon: <Plug className="h-3.5 w-3.5" />,
           onClick: () => handleConnectSaved(node),
         });
       }
       if (cfg) {
         items.push({
-          label: "编辑连接",
+          label: t("tree.editConnection"),
           icon: <Pencil className="h-3.5 w-3.5" />,
           onClick: () => onEditConnection(cfg),
         });
       }
       items.push({
-        label: showSystemDatabases ? "隐藏系统数据库" : "显示系统数据库",
+        label: showSystemDatabases ? t("tree.hideSystemDbs") : t("tree.showSystemDbs"),
         icon: showSystemDatabases ? (
           <EyeOff className="h-3.5 w-3.5" />
         ) : (
@@ -469,7 +472,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         onClick: handleToggleSystemDbs,
       });
       items.push({
-        label: "删除连接",
+        label: t("tree.deleteConnection"),
         icon: <Trash2 className="h-3.5 w-3.5" />,
         danger: true,
         onClick: () => handleDelete(node.id),
@@ -482,12 +485,12 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       const sysDb = isSystemDatabase(parts[2], driverType);
       const items: MenuItem[] = [
         {
-          label: "打开概览",
+          label: t("tree.openOverview"),
           icon: <Eye className="h-3.5 w-3.5" />,
           onClick: () => openDatabase(parts[0], parts[2]),
         },
         {
-          label: "新建查询",
+          label: t("app.newQuery"),
           icon: <FileCode2 className="h-3.5 w-3.5" />,
           onClick: () => {
             setActiveConnection(parts[0]);
@@ -496,12 +499,12 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           },
         },
         {
-          label: "刷新",
+          label: t("common.refresh"),
           icon: <RefreshCw className="h-3.5 w-3.5" />,
           onClick: () => refreshNode(node),
         },
         {
-          label: "转储 SQL 文件…",
+          label: t("tree.dumpSql"),
           icon: <Download className="h-3.5 w-3.5" />,
           onClick: () => setExportFor({ connId: parts[0], db: parts[2] }),
         },
@@ -512,7 +515,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           1,
           0,
           {
-            label: "新建表",
+            label: t("tree.newTable"),
             icon: <Table2 className="h-3.5 w-3.5" />,
             onClick: () => {
               setActiveConnection(parts[0]);
@@ -522,22 +525,18 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           }
         );
         items.push({
-          label: "导入 SQL 文件…",
+          label: t("tree.importSql"),
           icon: <Upload className="h-3.5 w-3.5" />,
           onClick: () => setImportFor({ connId: parts[0], db: parts[2] }),
         });
         // SQLite 的"数据库"就是文件本身，不提供删除入口
         if (driverType !== "sqlite") {
           items.push({
-            label: "删除数据库",
+            label: t("tree.dropDatabase"),
             icon: <Trash2 className="h-3.5 w-3.5" />,
             danger: true,
             onClick: () => {
-              if (
-                window.confirm(
-                  `确定删除数据库 ${parts[2]} 吗？其中所有表和数据都会被删除，此操作不可恢复！`
-                )
-              ) {
+              if (window.confirm(t("tree.confirmDropDatabase", { name: parts[2] }))) {
                 handleDropDatabase(node);
               }
             },
@@ -555,12 +554,12 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       const q = (n: string) => quoteIdent(n, driverType);
       return [
         {
-          label: "查看数据",
+          label: t("tree.viewData"),
           icon: <Eye className="h-3.5 w-3.5" />,
           onClick: () => openTable(connId, dbName, tableName),
         },
         {
-          label: "新建查询（SELECT *）",
+          label: t("tree.newQuerySelect"),
           icon: <FileCode2 className="h-3.5 w-3.5" />,
           onClick: () => {
             setActiveConnection(connId);
@@ -574,15 +573,15 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           },
         },
         {
-          label: "设计表",
+          label: t("tree.designTable"),
           icon: <Wrench className="h-3.5 w-3.5" />,
           onClick: () => openTable(connId, dbName, tableName), // 打开后切到结构页由用户选择
         },
         {
-          label: "重命名表",
+          label: t("tree.renameTable"),
           icon: <Pencil className="h-3.5 w-3.5" />,
           onClick: () => {
-            const newName = window.prompt("新表名:", tableName);
+            const newName = window.prompt(t("tree.promptNewTableName"), tableName);
             if (!newName || newName === tableName) return;
             const sql =
               driverType === "postgres" || driverType === "postgresql" || driverType === "sqlite"
@@ -590,11 +589,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 : driverType === "sqlserver" || driverType === "mssql"
                   ? `EXEC sp_rename '${tableName.replace(/'/g, "''")}', '${newName.replace(/'/g, "''")}';`
                   : `RENAME TABLE ${q(tableName)} TO ${q(newName)};`;
-            runTableDdl(node, sql, "重命名");
+            runTableDdl(node, sql, "tree.renameFailed");
           },
         },
         {
-          label: "导出 CSV",
+          label: t("tree.exportCsv"),
           icon: <Download className="h-3.5 w-3.5" />,
           onClick: async () => {
             try {
@@ -604,34 +603,34 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               });
               if (!path) return;
               const count = await tauriService.exportTableCsv(connId, dbName, tableName, path);
-              window.alert(`已导出 ${count} 行到 ${path}`);
+              window.alert(t("tree.exportedRows", { count, path }));
             } catch (err) {
-              setError(`导出失败: ${err}`);
+              setError(t("tree.exportFailed", { error: String(err) }));
             }
           },
         },
         {
-          label: "清空表",
+          label: t("tree.truncateTable"),
           icon: <Eraser className="h-3.5 w-3.5" />,
           danger: true,
           onClick: () => {
-            if (window.confirm(`确定清空表 ${tableName} 的所有数据吗？此操作不可恢复！`)) {
+            if (window.confirm(t("tree.confirmTruncate", { name: tableName }))) {
               // SQLite 没有 TRUNCATE，用 DELETE FROM 代替
               const sql =
                 driverType === "sqlite"
                   ? `DELETE FROM ${q(tableName)};`
                   : `TRUNCATE TABLE ${q(tableName)};`;
-              runTableDdl(node, sql, "清空表");
+              runTableDdl(node, sql, "tree.truncateFailed");
             }
           },
         },
         {
-          label: "删除表",
+          label: t("tree.dropTable"),
           icon: <Trash2 className="h-3.5 w-3.5" />,
           danger: true,
           onClick: () => {
-            if (window.confirm(`确定删除表 ${tableName} 吗？此操作不可恢复！`)) {
-              runTableDdl(node, `DROP TABLE ${q(tableName)};`, "删除表");
+            if (window.confirm(t("tree.confirmDropTable", { name: tableName }))) {
+              runTableDdl(node, `DROP TABLE ${q(tableName)};`, "tree.dropTableFailed");
             }
           },
         },
@@ -646,12 +645,12 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       const q = (n: string) => quoteIdent(n, driverType);
       return [
         {
-          label: "查看数据",
+          label: t("tree.viewData"),
           icon: <Eye className="h-3.5 w-3.5" />,
           onClick: () => openView(connId, dbName, viewName),
         },
         {
-          label: "新建查询（SELECT *）",
+          label: t("tree.newQuerySelect"),
           icon: <FileCode2 className="h-3.5 w-3.5" />,
           onClick: () => {
             setActiveConnection(connId);
@@ -664,7 +663,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           },
         },
         {
-          label: "导出 CSV",
+          label: t("tree.exportCsv"),
           icon: <Download className="h-3.5 w-3.5" />,
           onClick: async () => {
             try {
@@ -674,19 +673,19 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               });
               if (!path) return;
               const count = await tauriService.exportTableCsv(connId, dbName, viewName, path);
-              window.alert(`已导出 ${count} 行到 ${path}`);
+              window.alert(t("tree.exportedRows", { count, path }));
             } catch (err) {
-              setError(`导出失败: ${err}`);
+              setError(t("tree.exportFailed", { error: String(err) }));
             }
           },
         },
         {
-          label: "删除视图",
+          label: t("tree.dropView"),
           icon: <Trash2 className="h-3.5 w-3.5" />,
           danger: true,
           onClick: () => {
-            if (window.confirm(`确定删除视图 ${viewName} 吗？此操作不可恢复！`)) {
-              runTableDdl(node, `DROP VIEW ${q(viewName)};`, "删除视图");
+            if (window.confirm(t("tree.confirmDropView", { name: viewName }))) {
+              runTableDdl(node, `DROP VIEW ${q(viewName)};`, "tree.dropViewFailed");
             }
           },
         },
@@ -796,7 +795,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           <span className={`truncate ml-1.5 ${isSysDb ? "text-gray-400" : ""}`}>{node.name}</span>
           {isSysDb && (
             <span className="ml-1.5 text-[10px] px-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex-shrink-0">
-              系统
+              {t("tree.system")}
             </span>
           )}
           {node.metadata?.rowCount !== undefined && node.metadata?.rowCount !== null && (
@@ -808,7 +807,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             <span className="ml-auto opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
               {connected && (
                 <button
-                  title="断开连接（保留配置）"
+                  title={t("tree.disconnectKeep")}
                   className="hover:bg-gray-200 dark:hover:bg-gray-700 rounded p-0.5"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -819,7 +818,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 </button>
               )}
               <button
-                title="删除已保存的连接"
+                title={t("tree.deleteSavedTitle")}
                 className="hover:bg-gray-200 dark:hover:bg-gray-700 rounded p-0.5"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -839,13 +838,13 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   return (
     <div className="h-full flex flex-col border-r bg-card">
       <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
-        <span className="font-semibold text-sm">数据库连接</span>
+        <span className="font-semibold text-sm">{t("tree.title")}</span>
         <div className="flex items-center gap-0.5">
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
-            title={showSystemDatabases ? "隐藏系统数据库" : "显示系统数据库"}
+            title={showSystemDatabases ? t("tree.hideSystemDbs") : t("tree.showSystemDbs")}
             onClick={handleToggleSystemDbs}
           >
             {showSystemDatabases ? (
@@ -871,8 +870,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         {treeData.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm">
             <Plug className="h-8 w-8 mb-2 opacity-50" />
-            <p>暂无连接</p>
-            <p className="text-xs mt-1">点击 + 添加数据库连接</p>
+            <p>{t("tree.noConnections")}</p>
+            <p className="text-xs mt-1">{t("tree.addHint")}</p>
           </div>
         ) : (
           treeData.map((node) => renderNode(node))

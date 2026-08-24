@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useEditorStore } from "@/stores/editorStore";
+import { t } from "@/i18n";
 
 export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable";
 
@@ -122,7 +123,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const tab: WorkspaceTab = {
         id,
         kind: "createTable",
-        title: `新建表 · ${database}`,
+        title: t("ws.newTableTab", { database }),
         connectionId,
         database,
       };
@@ -138,7 +139,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const id = `query::${editorTabId}`;
     set((state) => {
       const title =
-        useEditorStore.getState().tabs.find((t) => t.id === editorTabId)?.title ?? "查询";
+        useEditorStore.getState().tabs.find((t) => t.id === editorTabId)?.title ?? t("ws.query");
       return {
         tabs: [...state.tabs, { id, kind: "query", title, connectionId, editorTabId }],
         activeId: id,

@@ -3,6 +3,7 @@ import { EditContext, QueryResult } from "@/types/database";
 import { cn, quoteIdent, sqlLiteral } from "@/lib/utils";
 import { Button } from "@/components/ui";
 import { Plus, Check, RotateCcw, Loader2, Pencil, Trash2, Undo2, Copy } from "lucide-react";
+import { useT } from "@/i18n";
 
 interface DataGridProps {
   result: QueryResult | undefined;
@@ -17,6 +18,7 @@ interface EditingCell {
 }
 
 export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
+  const t = useT();
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   /** 已有行的编辑：key = `${origRowIdx}:${colIdx}`，value = 新文本 */
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -181,7 +183,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (err) {
-      setSubmitError(`复制到剪贴板失败: ${err}`);
+      setSubmitError(t("grid.copyFailed", { error: String(err) }));
     }
   };
 
@@ -197,7 +199,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
   if (!result) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        <p>执行 SQL 查询以查看结果</p>
+        <p>{t("grid.runToSee")}</p>
       </div>
     );
   }
@@ -206,7 +208,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     return (
       <div className="flex items-center justify-center h-full text-sm px-4">
         <div className="text-center max-w-full">
-          <p className="text-red-600 font-medium">✗ 执行失败</p>
+          <p className="text-red-600 font-medium">{t("grid.execFailed")}</p>
           <p className="text-red-500 mt-1 break-words whitespace-pre-wrap font-mono text-xs">
             {result.error}
           </p>
@@ -219,9 +221,9 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     return (
       <div className="flex items-center justify-center h-full text-sm">
         <div className="text-center">
-          <p className="text-green-600 font-medium">✓ 执行成功</p>
+          <p className="text-green-600 font-medium">{t("grid.execSuccess")}</p>
           <p className="text-muted-foreground mt-1">
-            影响行数: {result.rowsAffected || 0} | 耗时: {result.executionTimeMs}ms
+            {t("grid.affected", { count: result.rowsAffected || 0, ms: result.executionTimeMs })}
           </p>
         </div>
       </div>
@@ -276,16 +278,16 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
       {/* 结果信息 + 编辑操作栏 */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/20 text-xs gap-2">
         <span className="text-muted-foreground">
-          {result.rows.length.toLocaleString()} 行
+          {t("grid.rows", { count: result.rows.length.toLocaleString() })}
           {result.truncated && (
-            <span className="text-amber-600 font-medium">（已达 10000 行上限，结果被截断）</span>
+            <span className="text-amber-600 font-medium">{t("grid.truncatedWarning")}</span>
           )}
           {result.executionTimeMs > 0 ? ` · ${result.executionTimeMs}ms` : ""}
           {editContext && (
-            <span className="ml-2 text-blue-600">· 表 {editContext.table}</span>
+            <span className="ml-2 text-blue-600">{t("grid.tablePrefix", { table: editContext.table })}</span>
           )}
           {editContext && !hasPrimaryKey && (
-            <span className="ml-2 text-amber-600">（无主键，只读）</span>
+            <span className="ml-2 text-amber-600">{t("grid.noPrimaryKey")}</span>
           )}
         </span>
 
@@ -298,12 +300,12 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
               onClick={() => setNewRows((prev) => [...prev, {}])}
             >
               <Plus className="h-3 w-3 mr-1" />
-              新增行
+              {t("grid.addRow")}
             </Button>
           )}
           {pendingCount > 0 && (
             <>
-              <span className="text-amber-600 font-medium">{pendingCount} 处待提交</span>
+              <span className="text-amber-600 font-medium">{t("grid.pending", { count: pendingCount })}</span>
               <Button
                 size="sm"
                 className="h-6 text-xs"
@@ -311,7 +313,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                 disabled={submitting}
               >
                 {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
-                提交
+                {t("grid.submit")}
               </Button>
               <Button
                 variant="outline"
@@ -321,7 +323,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                 disabled={submitting}
               >
                 <RotateCcw className="h-3 w-3 mr-1" />
-                放弃
+                {t("grid.discard")}
               </Button>
             </>
           )}
@@ -329,19 +331,19 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
             variant="ghost"
             size="sm"
             className="h-6 text-xs"
-            title="复制全部行（TSV，无表头）"
+            title={t("grid.copyAllTitle")}
             onClick={handleCopyAll}
           >
             {copied ? <Check className="h-3 w-3 mr-1 text-green-600" /> : <Copy className="h-3 w-3 mr-1" />}
-            {copied ? "已复制" : "复制全部"}
+            {copied ? t("grid.copied") : t("grid.copyAll")}
           </Button>
-          <span className="text-muted-foreground">{result.columns.length} 列</span>
+          <span className="text-muted-foreground">{t("grid.columns", { count: result.columns.length })}</span>
         </div>
       </div>
 
       {submitError && (
         <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">
-          提交失败（已回滚）: {submitError}
+          {t("grid.submitFailed", { error: submitError })}
         </div>
       )}
 
@@ -368,7 +370,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                   <div className="flex items-center gap-1">
                     {col.name}
                     {editContext?.primaryKeys.includes(col.name) && (
-                      <span className="text-yellow-500" title="主键">🔑</span>
+                      <span className="text-yellow-500" title={t("grid.primaryKey")}>🔑</span>
                     )}
                     {sortConfig?.key === col.name && (
                       <span>{sortConfig.direction === "asc" ? "▲" : "▼"}</span>
@@ -399,7 +401,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                           {rowIndex + 1}
                         </span>
                         <button
-                          title={isDeleted ? "恢复该行" : "删除该行"}
+                          title={isDeleted ? t("grid.restoreRow") : t("grid.deleteRow")}
                           className={cn(
                             "absolute inset-0 items-center justify-center",
                             isDeleted ? "flex" : "hidden group-hover/row:flex"
@@ -447,7 +449,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
             {newRows.map((newRow, newIdx) => (
               <tr key={`new-${newIdx}`} className="bg-green-50/60 dark:bg-green-900/10">
                 <td className="px-2 py-1 border-b border-r text-center text-xs text-green-600">
-                  新
+                  {t("grid.newBadge")}
                 </td>
                 {result.columns.map((_, colIndex) => {
                   const key = `new:${newIdx}:${colIndex}`;
@@ -460,7 +462,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                     >
                       {editingCell?.key === key
                         ? renderCellInput(key, current, (v) => commitNewRowCell(newIdx, colIndex, v))
-                        : current || <span className="text-gray-300 italic">双击编辑</span>}
+                        : current || <span className="text-gray-300 italic">{t("grid.doubleClickEdit")}</span>}
                     </td>
                   );
                 })}
