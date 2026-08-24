@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { ConnectionConfig } from "@/types/database";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useEditorStore } from "@/stores/editorStore";
@@ -15,6 +15,7 @@ import { CreateTableView } from "@/components/CreateTableView";
 import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ContextMenu } from "@/components/ContextMenu";
+import { Resizer } from "@/components/ui/Resizer";
 import { useThemeStore } from "@/stores/themeStore";
 
 export default function App() {
@@ -27,6 +28,20 @@ export default function App() {
   // tab 条溢出检测：压缩到最小宽度后仍放不下时，显示左右移动按钮
   const tabBarRef = useRef<HTMLDivElement>(null);
   const [tabOverflow, setTabOverflow] = useState(false);
+
+  // 侧栏宽度（可拖拽，持久化到 localStorage）
+  const SIDEBAR_DEFAULT = 256;
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const v = Number(localStorage.getItem("sqlink.sidebarWidth"));
+    return v >= 160 && v <= 560 ? v : SIDEBAR_DEFAULT;
+  });
+  const resizeSidebar = useCallback((delta: number) => {
+    setSidebarWidth((w) => {
+      const next = Math.min(560, Math.max(160, w + delta));
+      localStorage.setItem("sqlink.sidebarWidth", String(next));
+      return next;
+    });
+  }, []);
 
   const activeConnection = useConnectionStore((s) => s.activeConnection);
   const selectedDatabase = useConnectionStore((s) => s.selectedDatabase);
@@ -197,20 +212,30 @@ export default function App() {
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
       {/* 主体区域（顶部分左右：侧栏标题栏 | tab 条） */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左侧边栏 */}
+        {/* 左侧边栏（宽度可拖拽） */}
         {sidebarVisible && (
-          <div className="w-64 flex-shrink-0">
-            <ConnectionTree
-              onNewConnection={() => {
-                setEditingConnection(null);
-                setDialogOpen(true);
-              }}
-              onEditConnection={(cfg) => {
-                setEditingConnection(cfg);
-                setDialogOpen(true);
+          <>
+            <div className="flex-shrink-0 min-w-0" style={{ width: sidebarWidth }}>
+              <ConnectionTree
+                onNewConnection={() => {
+                  setEditingConnection(null);
+                  setDialogOpen(true);
+                }}
+                onEditConnection={(cfg) => {
+                  setEditingConnection(cfg);
+                  setDialogOpen(true);
+                }}
+              />
+            </div>
+            <Resizer
+              orientation="vertical"
+              onDrag={resizeSidebar}
+              onDoubleClick={() => {
+                setSidebarWidth(SIDEBAR_DEFAULT);
+                localStorage.setItem("sqlink.sidebarWidth", String(SIDEBAR_DEFAULT));
               }}
             />
-          </div>
+          </>
         )}
 
         {/* 右侧工作台 */}
@@ -441,6 +466,22 @@ function QueryPanel({
 }) {
   const tab = useEditorStore((s) => s.tabs.find((t) => t.id === editorTabId));
 
+  // 结果区高度（可拖拽，持久化到 localStorage）
+  const RESULT_DEFAULT = 256;
+  const [resultHeight, setResultHeight] = useState(() => {
+    const v = Number(localStorage.getItem("sqlink.resultHeight"));
+    return v >= 80 && v <= 800 ? v : RESULT_DEFAULT;
+  });
+  // 向上拖（delta 为负）结果区变高；给编辑器至少保留 120px
+  const resizeResult = useCallback((delta: number) => {
+    setResultHeight((h) => {
+      const max = Math.max(200, window.innerHeight - 260);
+      const next = Math.min(max, Math.max(80, h - delta));
+      localStorage.setItem("sqlink.resultHeight", String(next));
+      return next;
+    });
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 min-h-0">
@@ -452,7 +493,15 @@ function QueryPanel({
           onCancel={onCancel}
         />
       </div>
-      <div className="h-64 border-t flex-shrink-0">
+      <Resizer
+        orientation="horizontal"
+        onDrag={resizeResult}
+        onDoubleClick={() => {
+          setResultHeight(RESULT_DEFAULT);
+          localStorage.setItem("sqlink.resultHeight", String(RESULT_DEFAULT));
+        }}
+      />
+      <div className="border-t flex-shrink-0" style={{ height: resultHeight }}>
         <DataGrid
           result={tab?.result}
           editContext={tab?.editContext}
