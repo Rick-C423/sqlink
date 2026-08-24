@@ -57,8 +57,15 @@ fn build_config(config: &ConnectionConfig, database: Option<&str>) -> Config {
     cfg
 }
 
-async fn connect_client(config: &ConnectionConfig, database: Option<&str>) -> Result<TdsClient, DatabaseError> {
-    let cfg = build_config(config, database);
+async fn try_connect(
+    config: &ConnectionConfig,
+    database: Option<&str>,
+    encryption: Option<tiberius::EncryptionLevel>,
+) -> Result<TdsClient, DatabaseError> {
+    let mut cfg = build_config(config, database);
+    if let Some(level) = encryption {
+        cfg.encryption(level);
+    }
     let tcp = TcpStream::connect(cfg.get_addr())
         .await
         .map_err(|e| DatabaseError::ConnectionError(format!("TCP 连接失败: {}", e)))?;
@@ -66,6 +73,23 @@ async fn connect_client(config: &ConnectionConfig, database: Option<&str>) -> Re
     Client::connect(cfg, tcp.compat_write())
         .await
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))
+}
+
+async fn connect_client(config: &ConnectionConfig, database: Option<&str>) -> Result<TdsClient, DatabaseError> {
+    match try_connect(config, database, None).await {
+        Ok(client) => Ok(client),
+        Err(e) => {
+            let msg = e.to_string();
+            // 老版本 SQL Server（2014 及更早，或未打 TLS 1.2 补丁）只支持 TLS 1.0/1.1，
+            // rustls 无法与其握手（报 "tls handshake eof"）。降级为完全不加密重试：
+            // 服务器未强制加密时可用，内网生产库常见。
+            if msg.to_lowercase().contains("tls") {
+                try_connect(config, database, Some(tiberius::EncryptionLevel::NotSupported)).await
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseError> {
