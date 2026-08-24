@@ -133,6 +133,14 @@ export const tauriService = {
     return await invoke("schema_get_tables", { connectionId, database });
   },
 
+  async getViews(connectionId: string, database?: string): Promise<TableInfo[]> {
+    return await invoke("schema_get_views", { connectionId, database });
+  },
+
+  async getViewDefinition(connectionId: string, database: string | undefined, view: string): Promise<string> {
+    return await invoke("schema_get_view_definition", { connectionId, database, view });
+  },
+
   async getColumns(connectionId: string, database: string | undefined, table: string): Promise<ColumnInfo[]> {
     return await invoke("schema_get_columns", { connectionId, database, table });
   },

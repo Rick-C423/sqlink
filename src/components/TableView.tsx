@@ -13,6 +13,8 @@ interface TableViewProps {
   connectionId: string;
   database: string;
   table: string;
+  /** 视图等只读对象：禁用网格编辑 */
+  readonly?: boolean;
 }
 
 type SubTab = "data" | "structure";
@@ -110,7 +112,7 @@ function escapeLikeValue(v: string): string {
   return v.replace(/'/g, "''");
 }
 
-function TableData({ connectionId, database, table }: TableViewProps) {
+export function TableData({ connectionId, database, table, readonly }: TableViewProps) {
   const [result, setResult] = useState<QueryResult | undefined>();
   const [editContext, setEditContext] = useState<EditContext | null>(null);
   const [loading, setLoading] = useState(false);
@@ -148,7 +150,7 @@ function TableData({ connectionId, database, table }: TableViewProps) {
       setTotalRows(typeof total === "number" ? total : null);
       setResult(queryResult);
       setColNames(cols.map((c) => c.name));
-      if (!queryResult.error && queryResult.columns.length > 0) {
+      if (!readonly && !queryResult.error && queryResult.columns.length > 0) {
         setEditContext({
           connectionId,
           database,
@@ -164,7 +166,7 @@ function TableData({ connectionId, database, table }: TableViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [connectionId, database, table, page, pageSize, appliedFilters, driverType]);
+  }, [connectionId, database, table, page, pageSize, appliedFilters, driverType, readonly]);
 
   useEffect(() => {
     load();

@@ -11,8 +11,9 @@ import { SQLEditorPanel } from "@/components/editor/SQLEditor";
 import { DataGrid } from "@/components/result/DataGrid";
 import { DatabaseOverview } from "@/components/DatabaseOverview";
 import { TableView } from "@/components/TableView";
+import { ViewView } from "@/components/ViewView";
 import { CreateTableView } from "@/components/CreateTableView";
-import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ContextMenu } from "@/components/ContextMenu";
 import { Resizer } from "@/components/ui/Resizer";
@@ -201,6 +202,8 @@ export default function App() {
         return <FolderOpen className="h-3.5 w-3.5 text-blue-500" />;
       case "table":
         return <Table2 className="h-3.5 w-3.5 text-green-600" />;
+      case "view":
+        return <Eye className="h-3.5 w-3.5 text-teal-500" />;
       case "createTable":
         return <Plus className="h-3.5 w-3.5 text-amber-500" />;
       default:
@@ -293,6 +296,8 @@ export default function App() {
                     <Database className="h-3.5 w-3.5" />
                   ) : tab.kind === "createTable" ? (
                     <Plus className="h-3.5 w-3.5" />
+                  ) : tab.kind === "view" ? (
+                    <Eye className="h-3.5 w-3.5 text-teal-500" />
                   ) : (
                     <Table2 className="h-3.5 w-3.5" />
                   )}
@@ -381,6 +386,13 @@ export default function App() {
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     table={activeWs.table}
+                  />
+                )}
+                {activeWs?.kind === "view" && activeWs.database && activeWs.table && (
+                  <ViewView
+                    connectionId={activeWs.connectionId}
+                    database={activeWs.database}
+                    view={activeWs.table}
                   />
                 )}
                 {activeWs?.kind === "createTable" && activeWs.database && (

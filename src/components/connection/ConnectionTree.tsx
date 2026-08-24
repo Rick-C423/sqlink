@@ -77,6 +77,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
 
   const openDatabase = useWorkspaceStore((s) => s.openDatabase);
   const openTable = useWorkspaceStore((s) => s.openTable);
+  const openView = useWorkspaceStore((s) => s.openView);
   const openCreateTable = useWorkspaceStore((s) => s.openCreateTable);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
 
@@ -129,13 +130,53 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             const parts = node.id.split("::");
             const connectionId = parts[0];
             const dbName = parts[2];
-            const tables = await tauriService.getTables(connectionId, dbName);
+            // 表与视图一起拉；视图查询失败不阻塞表列表
+            const [tables, views] = await Promise.all([
+              tauriService.getTables(connectionId, dbName),
+              tauriService.getViews(connectionId, dbName).catch(() => []),
+            ]);
             children = tables.map((t) => ({
               id: `${node.id}::table::${t.name}`,
               type: "table" as const,
               name: t.name,
               metadata: { rowCount: t.rowCount },
             }));
+            // 有视图时追加「视图 (n)」分组节点，视图收在里面
+            if (views.length > 0) {
+              children.push({
+                id: `${node.id}::group::views`,
+                type: "folder" as const,
+                name: `视图 (${views.length})`,
+                metadata: { isGroup: true, groupKind: "views" },
+                children: views.map((v) => ({
+                  id: `${node.id}::view::${v.name}`,
+                  type: "view" as const,
+                  name: v.name,
+                })),
+              });
+            }
+            break;
+          }
+          case "view": {
+            // 视图展开只显示列（索引/外键对视图意义不大）
+            const viewParts = node.id.split("::");
+            const connectionId = viewParts[0];
+            const dbName = viewParts[2];
+            const viewName = viewParts[viewParts.length - 1];
+            const columns = await tauriService.getColumns(connectionId, dbName, viewName);
+            children = [
+              {
+                id: `${node.id}::folder::columns`,
+                type: "folder" as const,
+                name: `列 (${columns.length})`,
+                children: columns.map((col) => ({
+                  id: `${node.id}::col::${col.name}`,
+                  type: "column" as const,
+                  name: `${col.name} (${col.dataType}${col.nullable ? "" : " NOT NULL"})`,
+                  metadata: { ...col } as Record<string, unknown>,
+                })),
+              },
+            ];
             break;
           }
           case "table": {
@@ -307,6 +348,17 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         setActiveConnection(connId);
         setSelectedDatabase(dbName);
         openTable(connId, dbName, tableName);
+        return;
+      }
+      case "view": {
+        // 点击视图：打开视图 tab（数据只读/定义）
+        const parts = node.id.split("::");
+        const connId = parts[0];
+        const dbName = parts[2];
+        const viewName = parts[parts.length - 1];
+        setActiveConnection(connId);
+        setSelectedDatabase(dbName);
+        openView(connId, dbName, viewName);
         return;
       }
       case "folder":
@@ -586,6 +638,61 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       ];
     }
 
+    if (node.type === "view") {
+      const connId = parts[0];
+      const dbName = parts[2];
+      const viewName = parts[parts.length - 1];
+      const driverType = getDriverType(connId);
+      const q = (n: string) => quoteIdent(n, driverType);
+      return [
+        {
+          label: "查看数据",
+          icon: <Eye className="h-3.5 w-3.5" />,
+          onClick: () => openView(connId, dbName, viewName),
+        },
+        {
+          label: "新建查询（SELECT *）",
+          icon: <FileCode2 className="h-3.5 w-3.5" />,
+          onClick: () => {
+            setActiveConnection(connId);
+            setSelectedDatabase(dbName);
+            const sql =
+              driverType === "sqlserver" || driverType === "mssql"
+                ? `SELECT TOP 100 * FROM ${q(viewName)};`
+                : `SELECT * FROM ${q(viewName)} LIMIT 100;`;
+            openQuery(connId, sql);
+          },
+        },
+        {
+          label: "导出 CSV",
+          icon: <Download className="h-3.5 w-3.5" />,
+          onClick: async () => {
+            try {
+              const path = await save({
+                defaultPath: `${viewName}.csv`,
+                filters: [{ name: "CSV", extensions: ["csv"] }],
+              });
+              if (!path) return;
+              const count = await tauriService.exportTableCsv(connId, dbName, viewName, path);
+              window.alert(`已导出 ${count} 行到 ${path}`);
+            } catch (err) {
+              setError(`导出失败: ${err}`);
+            }
+          },
+        },
+        {
+          label: "删除视图",
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          danger: true,
+          onClick: () => {
+            if (window.confirm(`确定删除视图 ${viewName} 吗？此操作不可恢复！`)) {
+              runTableDdl(node, `DROP VIEW ${q(viewName)};`, "删除视图");
+            }
+          },
+        },
+      ];
+    }
+
     return [];
   };
 
@@ -614,6 +721,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         return <Database className="h-4 w-4 text-blue-500" />;
       case "table":
         return <Table2 className="h-4 w-4 text-green-600" />;
+      case "view":
+        return <Eye className="h-4 w-4 text-teal-500" />;
       case "column":
         return node.metadata?.isPrimaryKey ? (
           <Key className="h-4 w-4 text-yellow-500" />
@@ -623,7 +732,9 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       case "index":
         return <Columns className="h-4 w-4 text-purple-500" />;
       case "folder":
-        return node.metadata?.isGroup ? (
+        return node.metadata?.groupKind === "views" ? (
+          <Eye className="h-4 w-4 text-teal-500" />
+        ) : node.metadata?.isGroup ? (
           <Folder className="h-4 w-4 text-yellow-500" />
         ) : (
           <ChevronRight className="h-4 w-4 text-gray-400" />
@@ -643,7 +754,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
     const paddingLeft = depth * 16 + 8;
     const connected = node.type === "connection" && liveIds.has(node.id);
     const isLeaf = node.type === "column" || node.type === "index";
-    const hasMenu = ["connection", "database", "table"].includes(node.type);
+    const hasMenu = ["connection", "database", "table", "view"].includes(node.type);
     const isSysDb =
       node.type === "database" &&
       isSystemDatabase(node.name, getDriverType(node.id.split("::")[0]));

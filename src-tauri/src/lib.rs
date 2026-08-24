@@ -34,6 +34,8 @@ pub fn run() {
             commands::query::schema_get_columns,
             commands::query::schema_get_indexes,
             commands::query::schema_get_foreign_keys,
+            commands::query::schema_get_views,
+            commands::query::schema_get_view_definition,
             // SQL 转储导入
             commands::import::sql_import_file,
             commands::import::sql_dump_file,

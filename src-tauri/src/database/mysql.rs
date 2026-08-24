@@ -268,6 +268,53 @@ impl DatabaseDriver for MySqlDriver {
         Ok(tables)
     }
 
+    async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let sql = match database {
+            Some(db) => format!(
+                "SELECT TABLE_NAME FROM information_schema.TABLES \
+                 WHERE TABLE_SCHEMA = '{}' AND TABLE_TYPE = 'VIEW' ORDER BY TABLE_NAME",
+                db.replace('\\', "\\\\").replace('\'', "\\'")
+            ),
+            None => "SELECT TABLE_NAME FROM information_schema.TABLES \
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'VIEW' ORDER BY TABLE_NAME"
+                .to_string(),
+        };
+        let result = self.query(&sql, None, None).await?;
+        Ok(result.rows.iter()
+            .filter_map(|row| {
+                let name = row.values.first()
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())?;
+                Some(TableInfo {
+                    name: name.to_string(),
+                    schema: database.map(|d| d.to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: None,
+                })
+            })
+            .collect())
+    }
+
+    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+        let sql = match database {
+            Some(db) => format!(
+                "SHOW CREATE VIEW `{}`.`{}`",
+                self.escape_identifier(db),
+                self.escape_identifier(view)
+            ),
+            None => format!("SHOW CREATE VIEW `{}`", self.escape_identifier(view)),
+        };
+        let result = self.query(&sql, None, None).await?;
+        // SHOW CREATE VIEW 返回: View | Create View | character_set_client | collation_connection
+        result.rows.first()
+            .and_then(|r| r.values.get(1))
+            .and_then(|v| v.as_ref())
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 定义为空", view)))
+    }
+
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         // SHOW FULL COLUMNS 比 SHOW COLUMNS 多出 Collation/Privileges/Comment 三列
         let sql = match database {

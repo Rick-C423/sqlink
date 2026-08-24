@@ -122,3 +122,26 @@ pub async fn schema_get_foreign_keys(
         .map_err(|e| e.to_string())?;
     driver.get_foreign_keys(database.as_deref(), &table).await.map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn schema_get_views(
+    connection_id: String,
+    database: Option<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<Vec<TableInfo>, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_views(database.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_view_definition(
+    connection_id: String,
+    database: Option<String>,
+    view: String,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<String, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_view_definition(database.as_deref(), &view).await.map_err(|e| e.to_string())
+}

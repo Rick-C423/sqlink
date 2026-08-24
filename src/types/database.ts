@@ -98,7 +98,7 @@ export interface ForeignKeyInfo {
 
 export interface TreeNode {
   id: string;
-  type: 'connection' | 'database' | 'table' | 'column' | 'index' | 'folder';
+  type: 'connection' | 'database' | 'table' | 'view' | 'column' | 'index' | 'folder';
   name: string;
   children?: TreeNode[];
   isExpanded?: boolean;

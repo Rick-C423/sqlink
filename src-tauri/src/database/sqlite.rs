@@ -238,6 +238,40 @@ impl DatabaseDriver for SqliteDriver {
         Ok(tables)
     }
 
+    async fn get_views(&self, _database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name")
+            .map_err(map_err)?;
+        let views = stmt
+            .query_map([], |r| {
+                let name: String = r.get(0)?;
+                Ok(TableInfo {
+                    name,
+                    schema: Some("main".to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: None,
+                })
+            })
+            .map_err(map_err)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(views)
+    }
+
+    async fn get_view_definition(&self, _database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1")
+            .map_err(map_err)?;
+        let mut rows = stmt.query(rusqlite::params![view]).map_err(map_err)?;
+        match rows.next().map_err(map_err)? {
+            Some(row) => row.get::<_, String>(0).map_err(map_err),
+            None => Err(DatabaseError::Unknown(format!("视图 {} 不存在", view))),
+        }
+    }
+
     async fn get_columns(&self, _database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let conn = self.lock()?;
         let mut stmt = conn

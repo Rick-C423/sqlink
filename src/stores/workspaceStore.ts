@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useEditorStore } from "@/stores/editorStore";
 
-export type WorkspaceTabKind = "query" | "database" | "table" | "createTable";
+export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable";
 
 export interface WorkspaceTab {
   id: string;
@@ -22,6 +22,8 @@ interface WorkspaceState {
   openDatabase: (connectionId: string, database: string) => void;
   /** 打开/聚焦表视图 tab */
   openTable: (connectionId: string, database: string, table: string) => void;
+  /** 打开/聚焦视图 tab（数据只读 + 定义） */
+  openView: (connectionId: string, database: string, view: string) => void;
   /** 打开/聚焦新建表设计器 tab（每个库一个） */
   openCreateTable: (connectionId: string, database: string) => void;
   /** 新建查询 tab（始终排在最后），可预填 SQL */
@@ -80,6 +82,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         table,
       };
       const idx = insertIndexFor(state.tabs, "table");
+      const tabs = [...state.tabs];
+      tabs.splice(idx, 0, tab);
+      return { tabs, activeId: id };
+    });
+  },
+
+  openView: (connectionId, database, view) => {
+    const id = `view::${connectionId}::${database}::${view}`;
+    const existing = get().tabs.find((t) => t.id === id);
+    if (existing) {
+      set({ activeId: id });
+      return;
+    }
+    set((state) => {
+      const tab: WorkspaceTab = {
+        id,
+        kind: "view",
+        title: view,
+        connectionId,
+        database,
+        table: view,
+      };
+      const idx = insertIndexFor(state.tabs, "view");
       const tabs = [...state.tabs];
       tabs.splice(idx, 0, tab);
       return { tabs, activeId: id };

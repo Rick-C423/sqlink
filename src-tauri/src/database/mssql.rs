@@ -197,6 +197,40 @@ impl DatabaseDriver for MsSqlDriver {
         Ok(tables)
     }
 
+    async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.simple_query(
+            "SELECT v.name, SCHEMA_NAME(v.schema_id) \
+             FROM sys.views v ORDER BY v.name",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: &str = row.get(0).unwrap_or("");
+            let schema: Option<&str> = row.get(1);
+            TableInfo {
+                name: name.to_string(),
+                schema: schema.map(|s| s.to_string()),
+                row_count: None,
+                engine: None,
+                comment: None,
+            }
+        }).collect())
+    }
+
+    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        // OBJECT_DEFINITION 返回 CREATE VIEW 完整文本
+        let stream = client.query(
+            "SELECT OBJECT_DEFINITION(OBJECT_ID(@P1, 'V'))",
+            &[&view],
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        rows.first()
+            .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
+            .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 定义为空", view)))
+    }
+
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let stream = client.query(

@@ -237,6 +237,40 @@ impl DatabaseDriver for PgDriver {
         Ok(tables)
     }
 
+    async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let client = self.client_for(database).await?;
+        // relkind: v = 普通视图, m = 物化视图
+        let rows = client.query(
+            "SELECT c.relname, CASE c.relkind WHEN 'm' THEN 'materialized' ELSE 'view' END \
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm') ORDER BY c.relname",
+            &[],
+        ).await.map_err(map_pg_query_error)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: String = row.get(0);
+            let kind: &str = row.get(1);
+            TableInfo {
+                name,
+                schema: Some("public".to_string()),
+                row_count: None,
+                engine: Some(kind.to_string()),
+                comment: None,
+            }
+        }).collect())
+    }
+
+    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let row = client.query_opt(
+            "SELECT pg_get_viewdef(format('%I.%I', 'public', $1)::regclass, true)",
+            &[&view],
+        ).await.map_err(map_pg_query_error)?;
+        let def: Option<String> = row.and_then(|r| r.get(0));
+        def.map(|d| format!("CREATE OR REPLACE VIEW public.\"{}\" AS\n{}", view.replace('"', "\"\""), d))
+            .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 不存在", view)))
+    }
+
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
         let rows = client.query(
