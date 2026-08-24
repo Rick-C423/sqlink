@@ -723,8 +723,9 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         const connected = liveIds.has(node.id);
         const markerColor = (node.metadata?.color as string) || "gray";
         // 圆点 = 连接状态灯（绿=已连接，灰=未连接）；服务器图标 = 颜色标记
+        // 未连接时图标统一灰色，不显示标记色，避免与状态灯绿色混淆
         const dotColor = connected ? "#22c55e" : "#6b7280";
-        const iconColor = markerColor !== "gray" ? COLOR_MAP[markerColor] : undefined;
+        const iconColor = connected && markerColor !== "gray" ? COLOR_MAP[markerColor] : undefined;
         return (
           <span className="flex items-center gap-1.5">
             <span
