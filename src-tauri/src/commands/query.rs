@@ -145,3 +145,25 @@ pub async fn schema_get_view_definition(
         .map_err(|e| e.to_string())?;
     driver.get_view_definition(database.as_deref(), &view).await.map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn schema_get_users(
+    connection_id: String,
+    database: Option<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<Vec<DbUserInfo>, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_users(database.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_current_user(
+    connection_id: String,
+    database: Option<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<CurrentUserInfo, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_current_user(database.as_deref()).await.map_err(|e| e.to_string())
+}

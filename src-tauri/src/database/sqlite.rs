@@ -272,6 +272,18 @@ impl DatabaseDriver for SqliteDriver {
         }
     }
 
+    async fn get_users(&self, _database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
+        // SQLite 无账号体系
+        Ok(Vec::new())
+    }
+
+    async fn get_current_user(&self, _database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+        Ok(CurrentUserInfo {
+            user: "local".to_string(),
+            grants: vec!["对数据库文件拥有全部权限（SQLite 无账号体系）".to_string()],
+        })
+    }
+
     async fn get_columns(&self, _database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let conn = self.lock()?;
         let mut stmt = conn

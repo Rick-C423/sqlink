@@ -271,6 +271,52 @@ impl DatabaseDriver for PgDriver {
             .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 不存在", view)))
     }
 
+    async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let rows = client.query(
+            "SELECT rolname, rolsuper FROM pg_roles WHERE rolcanlogin ORDER BY rolname",
+            &[],
+        ).await.map_err(map_pg_query_error)?;
+        Ok(rows.iter().map(|row| {
+            let name: String = row.get(0);
+            let is_super: bool = row.get(1);
+            DbUserInfo {
+                name,
+                host: None,
+                note: if is_super { Some("超级用户".to_string()) } else { None },
+            }
+        }).collect())
+    }
+
+    async fn get_current_user(&self, database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let row = client.query_one("SELECT current_user", &[]).await.map_err(map_pg_query_error)?;
+        let user: String = row.get(0);
+
+        let mut grants: Vec<String> = Vec::new();
+        // 角色成员关系
+        let rows = client.query(
+            "SELECT '成员角色: ' || r.rolname FROM pg_auth_members m \
+             JOIN pg_roles r ON r.oid = m.roleid \
+             WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)",
+            &[],
+        ).await.map_err(map_pg_query_error)?;
+        for r in &rows {
+            grants.push(r.get(0));
+        }
+        // 表级权限
+        let rows = client.query(
+            "SELECT 'GRANT ' || privilege_type || ' ON ' || table_schema || '.' || table_name \
+             FROM information_schema.role_table_grants WHERE grantee = current_user \
+             ORDER BY table_schema, table_name LIMIT 200",
+            &[],
+        ).await.map_err(map_pg_query_error)?;
+        for r in &rows {
+            grants.push(r.get(0));
+        }
+        Ok(CurrentUserInfo { user, grants })
+    }
+
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
         let rows = client.query(

@@ -34,6 +34,7 @@ import {
   Eye,
   Wrench,
   Eraser,
+  ShieldCheck,
   FileCode2,
 } from "lucide-react";
 
@@ -82,6 +83,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openView = useWorkspaceStore((s) => s.openView);
   const openCreateTable = useWorkspaceStore((s) => s.openCreateTable);
+  const openUsers = useWorkspaceStore((s) => s.openUsers);
+  const openServer = useWorkspaceStore((s) => s.openServer);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
 
   const [error, setError] = useState<string | null>(null);
@@ -326,6 +329,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       case "connection":
         if (liveIds.has(node.id)) {
           setActiveConnection(node.id);
+          openServer(node.id, node.name);
           toggleExpand(node);
         } else {
           handleConnectSaved(node);
@@ -423,6 +427,14 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       const items: MenuItem[] = [];
       if (connected) {
         items.push({
+          label: t("tree.serverOverview"),
+          icon: <Server className="h-3.5 w-3.5" />,
+          onClick: () => {
+            setActiveConnection(node.id);
+            openServer(node.id, node.name);
+          },
+        });
+        items.push({
           label: t("app.newQuery"),
           icon: <FileCode2 className="h-3.5 w-3.5" />,
           onClick: () => {
@@ -438,6 +450,14 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             onClick: () => setCreateDbFor(node.id),
           });
         }
+        items.push({
+          label: "用户与权限",
+          icon: <ShieldCheck className="h-3.5 w-3.5" />,
+          onClick: () => {
+            setActiveConnection(node.id);
+            openUsers(node.id);
+          },
+        });
         items.push({
           label: t("tree.disconnect"),
           icon: <Unplug className="h-3.5 w-3.5" />,
@@ -702,17 +722,19 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       case "connection": {
         const connected = liveIds.has(node.id);
         const markerColor = (node.metadata?.color as string) || "gray";
-        // 圆点兼作状态灯：已连接统一绿色；未连接显示颜色标记
-        const dotColor = connected
-          ? "#22c55e"
-          : COLOR_MAP[markerColor] || COLOR_MAP.gray;
+        // 圆点 = 连接状态灯（绿=已连接，灰=未连接）；服务器图标 = 颜色标记
+        const dotColor = connected ? "#22c55e" : "#6b7280";
+        const iconColor = markerColor !== "gray" ? COLOR_MAP[markerColor] : undefined;
         return (
           <span className="flex items-center gap-1.5">
             <span
               className="w-2 h-2 rounded-full flex-shrink-0"
               style={{ backgroundColor: dotColor }}
             />
-            <Server className={`h-4 w-4 ${connected ? "text-orange-500" : "text-gray-300"}`} />
+            <Server
+              className={`h-4 w-4 ${iconColor ? "" : connected ? "text-orange-500" : "text-gray-300"}`}
+              style={iconColor ? { color: iconColor } : undefined}
+            />
           </span>
         );
       }
@@ -779,6 +801,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               className="w-4 h-4 mr-1 flex items-center justify-center"
               onClick={(e) => {
                 e.stopPropagation();
+                // 未连接的连接节点：点箭头直接自动建连并展开，而不是报"连接已关闭"
+                if (node.type === "connection" && !liveIds.has(node.id)) {
+                  handleConnectSaved(node);
+                  return;
+                }
                 toggleExpand(node);
               }}
             >

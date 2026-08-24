@@ -26,6 +26,10 @@ pub trait DatabaseDriver: Send + Sync {
     async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 视图的创建定义 SQL（只读展示用）
     async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError>;
+    /// 账号列表（服务器级；database 仅用于选择连接上下文）
+    async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError>;
+    /// 当前会话用户及其授权（可读文本列表）
+    async fn get_current_user(&self, database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError>;
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError>;
     async fn get_indexes(&self, database: Option<&str>, table: &str) -> Result<Vec<IndexInfo>, DatabaseError>;
     async fn get_foreign_keys(&self, database: Option<&str>, table: &str) -> Result<Vec<ForeignKeyInfo>, DatabaseError>;

@@ -75,6 +75,33 @@ const enUS: Record<MessageKey, string> = {
   "tree.dropView": "Drop View",
   "tree.confirmDropView": "Drop view {name}? This cannot be undone!",
   "tree.dropViewFailed": "Drop view failed: {error}",
+  "tree.serverOverview": "Server Overview",
+
+  // ---------- Server overview (ServerOverview.tsx) ----------
+  "server.databases": "Databases ({count})",
+  "server.noDatabases": "No databases",
+  "server.users": "Users ({count})",
+  "server.noUsers": "No accounts",
+  "server.usersUnsupported": "SQLite has no user accounts",
+  "server.usersFailed": "Failed to load users: {error}",
+  "server.manageUsers": "Manage",
+  "server.manageUsersTitle": "Open user & privilege management",
+
+  // ---------- Visual privilege editor (PrivilegeEditor.tsx) ----------
+  "priv.global": "Global privileges (*.*)",
+  "priv.dbScope": "Database: {db}",
+  "priv.grantOption": "Can grant to others (GRANT OPTION)",
+  "priv.addDb": "Add database privileges",
+  "priv.selectDb": "Select database…",
+  "priv.save": "Save Privileges",
+  "priv.removeScope": "Revoke all on this database",
+  "priv.unparsed": "These grants could not be parsed and will be kept as-is:",
+  "priv.saved": "Privileges updated",
+  "priv.saveFailed": "Failed to save privileges: {error}",
+  "priv.groupData": "Data",
+  "priv.groupStructure": "Structure",
+  "priv.groupAdmin": "Administration",
+  "priv.account": "Account",
 
   // ---------- Connection dialog (ConnectionDialog.tsx) ----------
   "connDialog.editTitle": "Edit Database Connection",

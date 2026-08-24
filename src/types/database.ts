@@ -69,6 +69,19 @@ export interface HistoryEntry {
   truncated: boolean;
 }
 
+/** 数据库账号信息 */
+export interface DbUserInfo {
+  name: string;
+  host?: string;
+  note?: string;
+}
+
+/** 当前会话用户及其授权语句 */
+export interface CurrentUserInfo {
+  user: string;
+  grants: string[];
+}
+
 export interface ColumnInfo {
   name: string;
   dataType: string;

@@ -77,6 +77,33 @@ const zhCN = {
   "tree.dropView": "删除视图",
   "tree.confirmDropView": "确定删除视图 {name} 吗？此操作不可恢复！",
   "tree.dropViewFailed": "删除视图失败: {error}",
+  "tree.serverOverview": "服务器概览",
+
+  // ---------- 服务器概览（ServerOverview.tsx） ----------
+  "server.databases": "数据库 ({count})",
+  "server.noDatabases": "没有数据库",
+  "server.users": "用户 ({count})",
+  "server.noUsers": "无账号",
+  "server.usersUnsupported": "SQLite 无账号体系",
+  "server.usersFailed": "无法获取用户列表: {error}",
+  "server.manageUsers": "管理",
+  "server.manageUsersTitle": "打开用户与权限管理",
+
+  // ---------- 可视化权限编辑器（PrivilegeEditor.tsx） ----------
+  "priv.global": "全局权限（*.*）",
+  "priv.dbScope": "库：{db}",
+  "priv.grantOption": "允许授权他人（GRANT OPTION）",
+  "priv.addDb": "添加库权限",
+  "priv.selectDb": "选择数据库…",
+  "priv.save": "保存权限",
+  "priv.removeScope": "移除该库全部权限",
+  "priv.unparsed": "以下授权未能解析，将原样保留：",
+  "priv.saved": "权限已更新",
+  "priv.saveFailed": "保存权限失败: {error}",
+  "priv.groupData": "数据",
+  "priv.groupStructure": "结构",
+  "priv.groupAdmin": "管理",
+  "priv.account": "账号",
 
   // ---------- 连接对话框（ConnectionDialog.tsx） ----------
   "connDialog.editTitle": "编辑数据库连接",

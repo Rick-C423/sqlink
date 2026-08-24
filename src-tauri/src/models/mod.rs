@@ -123,6 +123,25 @@ pub struct DumpSummary {
     pub rows: u64,
 }
 
+/// 数据库账号信息（服务器级）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbUserInfo {
+    pub name: String,
+    /// MySQL 的 host 部分（如 %、localhost）；其他驱动为 None
+    pub host: Option<String>,
+    /// 附加说明（如 PG 的 superuser / SQL Server 的类型）
+    pub note: Option<String>,
+}
+
+/// 当前会话用户及其授权语句（可读文本列表）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentUserInfo {
+    pub user: String,
+    pub grants: Vec<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DatabaseError {
     #[error("连接错误: {0}")]

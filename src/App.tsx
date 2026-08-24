@@ -12,8 +12,10 @@ import { DataGrid } from "@/components/result/DataGrid";
 import { DatabaseOverview } from "@/components/DatabaseOverview";
 import { TableView } from "@/components/TableView";
 import { ViewView } from "@/components/ViewView";
+import { UsersView } from "@/components/UsersView";
+import { ServerOverview } from "@/components/ServerOverview";
 import { CreateTableView } from "@/components/CreateTableView";
-import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages } from "lucide-react";
+import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages, ShieldCheck, Server } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ContextMenu } from "@/components/ContextMenu";
 import { Resizer } from "@/components/ui/Resizer";
@@ -209,6 +211,10 @@ export default function App() {
         return <Table2 className="h-3.5 w-3.5 text-green-600" />;
       case "view":
         return <Eye className="h-3.5 w-3.5 text-teal-500" />;
+      case "users":
+        return <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />;
+      case "server":
+        return <Server className="h-3.5 w-3.5 text-orange-500" />;
       case "createTable":
         return <Plus className="h-3.5 w-3.5 text-amber-500" />;
       default:
@@ -303,6 +309,10 @@ export default function App() {
                     <Plus className="h-3.5 w-3.5" />
                   ) : tab.kind === "view" ? (
                     <Eye className="h-3.5 w-3.5 text-teal-500" />
+                  ) : tab.kind === "users" ? (
+                    <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
+                  ) : tab.kind === "server" ? (
+                    <Server className="h-3.5 w-3.5 text-orange-500" />
                   ) : (
                     <Table2 className="h-3.5 w-3.5" />
                   )}
@@ -416,6 +426,12 @@ export default function App() {
                     database={activeWs.database}
                     tabId={activeWs.id}
                   />
+                )}
+                {activeWs?.kind === "users" && (
+                  <UsersView connectionId={activeWs.connectionId} />
+                )}
+                {activeWs?.kind === "server" && (
+                  <ServerOverview connectionId={activeWs.connectionId} />
                 )}
                 {activeWs?.kind === "query" && activeWs.editorTabId && (
                   <QueryPanel

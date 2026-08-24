@@ -315,6 +315,32 @@ impl DatabaseDriver for MySqlDriver {
             .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 定义为空", view)))
     }
 
+    async fn get_users(&self, _database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
+        let result = self.query("SELECT User, Host FROM mysql.user ORDER BY User, Host", None, None).await?;
+        Ok(result.rows.iter()
+            .filter_map(|row| {
+                let name = row.values.first()?.as_ref()?.as_str()?.to_string();
+                let host = row.values.get(1).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).map(|s| s.to_string());
+                Some(DbUserInfo { name, host, note: None })
+            })
+            .collect())
+    }
+
+    async fn get_current_user(&self, _database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+        let user_result = self.query("SELECT CURRENT_USER()", None, None).await?;
+        let user = user_result.rows.first()
+            .and_then(|r| r.values.first())
+            .and_then(|v| v.as_ref())
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let grants_result = self.query("SHOW GRANTS", None, None).await?;
+        let grants = grants_result.rows.iter()
+            .filter_map(|r| r.values.first().and_then(|v| v.as_ref()).and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .collect();
+        Ok(CurrentUserInfo { user, grants })
+    }
+
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         // SHOW FULL COLUMNS 比 SHOW COLUMNS 多出 Collation/Privileges/Comment 三列
         let sql = match database {

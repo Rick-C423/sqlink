@@ -255,6 +255,54 @@ impl DatabaseDriver for MsSqlDriver {
             .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 定义为空", view)))
     }
 
+    async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        // 服务器级登录名：SQL 登录 + Windows 登录，排除系统内置
+        let stream = client.simple_query(
+            "SELECT name, type_desc FROM sys.server_principals \
+             WHERE type IN ('S', 'U') AND name NOT LIKE '##%' AND name <> 'sa' \
+             ORDER BY name",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        Ok(rows.iter().map(|row| {
+            let name: &str = row.get(0).unwrap_or("");
+            let type_desc: &str = row.get(1).unwrap_or("");
+            DbUserInfo {
+                name: name.to_string(),
+                host: None,
+                note: Some(if type_desc.contains("SQL") { "SQL 登录".to_string() } else { "Windows 登录".to_string() }),
+            }
+        }).collect())
+    }
+
+    async fn get_current_user(&self, database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.simple_query("SELECT SUSER_NAME()").await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        let user = rows.first()
+            .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // 服务器级权限 + 服务器角色成员
+        let stream = client.simple_query(
+            "SELECT sp.state_desc + ' ' + sp.permission_name \
+             FROM sys.server_permissions sp \
+             JOIN sys.server_principals p ON sp.grantee_principal_id = p.principal_id \
+             WHERE p.name = SUSER_NAME() AND sp.major_id = 0 \
+             UNION ALL \
+             SELECT '成员角色: ' + r.name \
+             FROM sys.server_role_members m \
+             JOIN sys.server_principals r ON m.role_principal_id = r.principal_id \
+             JOIN sys.server_principals u ON m.member_principal_id = u.principal_id \
+             WHERE u.name = SUSER_NAME()",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        let grants = rows.iter()
+            .filter_map(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
+            .collect();
+        Ok(CurrentUserInfo { user, grants })
+    }
+
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let stream = client.query(

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { useEditorStore } from "@/stores/editorStore";
 import { t } from "@/i18n";
 
-export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable";
+export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable" | "users" | "server";
 
 export interface WorkspaceTab {
   id: string;
@@ -27,6 +27,10 @@ interface WorkspaceState {
   openView: (connectionId: string, database: string, view: string) => void;
   /** 打开/聚焦新建表设计器 tab（每个库一个） */
   openCreateTable: (connectionId: string, database: string) => void;
+  /** 打开/聚焦用户与权限管理 tab（每个连接一个） */
+  openUsers: (connectionId: string) => void;
+  /** 打开/聚焦服务器概览 tab（每个连接一个），name 为连接名 */
+  openServer: (connectionId: string, name: string) => void;
   /** 新建查询 tab（始终排在最后），可预填 SQL */
   openQuery: (connectionId: string, content?: string) => void;
   activate: (id: string) => void;
@@ -134,8 +138,38 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
-  openQuery: (connectionId, content) => {
-    const editorTabId = useEditorStore.getState().addTab(undefined, content);
+  openUsers: (connectionId) => {
+    const id = `users::${connectionId}`;
+    const existing = get().tabs.find((t) => t.id === id);
+    if (existing) {
+      set({ activeId: id });
+      return;
+    }
+    set((state) => ({
+      tabs: [
+        { id, kind: "users" as const, title: "用户与权限", connectionId },
+        ...state.tabs,
+      ],
+      activeId: id,
+    }));
+  },
+
+  openServer: (connectionId, name) => {
+    const id = `server::${connectionId}`;
+    const existing = get().tabs.find((t) => t.id === id);
+    if (existing) {
+      set({ activeId: id });
+      return;
+    }
+    set((state) => {
+      const idx = insertIndexFor(state.tabs, "server");
+      const tabs = [...state.tabs];
+      tabs.splice(idx, 0, { id, kind: "server", title: name, connectionId });
+      return { tabs, activeId: id };
+    });
+  },
+
+  openQuery: (connectionId, content) => {    const editorTabId = useEditorStore.getState().addTab(undefined, content);
     const id = `query::${editorTabId}`;
     set((state) => {
       const title =

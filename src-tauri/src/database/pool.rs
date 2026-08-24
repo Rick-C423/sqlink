@@ -51,10 +51,19 @@ impl ConnectionPoolManager {
     }
 
     pub async fn get_connection(&self, id: &str) -> Result<Arc<dyn DatabaseDriver>, DatabaseError> {
-        let connections = self.connections.read().await;
-        connections.get(id)
-            .cloned()
-            .ok_or(DatabaseError::ConnectionClosed)
+        // 快路径：已有活动连接
+        if let Some(d) = self.connections.read().await.get(id).cloned() {
+            return Ok(d);
+        }
+        // 活动连接不存在（应用重启 / 被服务端断开）：用已保存配置自动重连，
+        // 避免向前端抛"连接已关闭"——用户感知不到中断
+        let config = self.store.as_ref()
+            .and_then(|s| s.get_decrypted(id).ok().flatten())
+            .ok_or(DatabaseError::ConnectionClosed)?;
+        let driver = create_and_connect_driver(&config).await?;
+        self.configs.write().await.insert(id.to_string(), config);
+        self.connections.write().await.insert(id.to_string(), driver.clone());
+        Ok(driver)
     }
 
     pub async fn disconnect(&self, id: &str) -> Result<(), DatabaseError> {
