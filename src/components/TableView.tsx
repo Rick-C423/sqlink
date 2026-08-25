@@ -137,7 +137,10 @@ export function TableData({ connectionId, database, table, readonly }: TableView
     setError(null);
     const qt = quoteIdent(table, driverType);
     const where = buildWhere(appliedFilters, driverType);
-    const countSql = `SELECT COUNT(*) AS cnt FROM ${qt}${where}`;
+    // SQL Server 的 COUNT(*) 返回 int，表超过 21 亿行会溢出（错误 8115）；用 COUNT_BIG 返回 bigint
+    const countExpr =
+      driverType === "sqlserver" || driverType === "mssql" ? "COUNT_BIG(*)" : "COUNT(*)";
+    const countSql = `SELECT ${countExpr} AS cnt FROM ${qt}${where}`;
     // SQL Server 用 OFFSET/FETCH（需要 ORDER BY）；其余用 LIMIT/OFFSET
     const dataSql =
       driverType === "sqlserver" || driverType === "mssql"

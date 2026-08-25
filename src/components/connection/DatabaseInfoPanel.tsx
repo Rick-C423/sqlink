@@ -39,7 +39,7 @@ function infoQueries(driver: string, db: string): string[] {
     return [
       `SELECT CONVERT(varchar(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')) AS collation, ` +
         `(SELECT COUNT(*) FROM sys.tables) AS table_count, ` +
-        `(SELECT SUM(size) * 8 * 1024 FROM sys.database_files) AS size_bytes`,
+        `(SELECT CONVERT(BIGINT, SUM(size)) * 8 * 1024 FROM sys.database_files) AS size_bytes`,
     ];
   }
   // sqlite
