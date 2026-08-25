@@ -1,6 +1,6 @@
 [package]
 name = "sqlconnect"
-version = "0.1.1"
+version = "0.1.2"
 description = "SQLink - 数据库管理工具"
 authors = ["SQLink Team"]
 edition = "2021"
