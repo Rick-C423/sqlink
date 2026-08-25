@@ -17,7 +17,13 @@ import {
   ChevronDown,
   Database,
   Table2,
-  Columns,
+  Type,
+  Hash,
+  Calendar,
+  Binary,
+  Braces,
+  ToggleLeft,
+  ListOrdered,
   Key,
   Loader2,
   Plug,
@@ -36,6 +42,9 @@ import {
   Eraser,
   ShieldCheck,
   FileCode2,
+  Zap,
+  FileCog,
+  Sigma,
 } from "lucide-react";
 
 interface ConnectionTreeProps {
@@ -57,6 +66,22 @@ interface MenuState {
   y: number;
   node: TreeNode;
 }
+
+/** 叶子节点类型：无子节点、不显示展开箭头（触发器/存储过程/函数点击直接打开定义） */
+const LEAF_TYPES: TreeNode["type"][] = ["column", "index", "trigger", "procedure", "function"];
+const isLeafType = (type: TreeNode["type"]) => LEAF_TYPES.includes(type);
+
+/** 按列数据类型选图标（Columns 图标在 16px 下渲染像乱码，改用更直观的类型符号） */
+const columnTypeIcon = (dataType?: string) => {
+  const dt = (dataType || "").toLowerCase();
+  if (/bool|bit/.test(dt)) return <ToggleLeft className="h-4 w-4 text-gray-500" />;
+  if (/int|decimal|numeric|float|double|real|number|money/.test(dt))
+    return <Hash className="h-4 w-4 text-gray-500" />;
+  if (/date|time|year/.test(dt)) return <Calendar className="h-4 w-4 text-gray-500" />;
+  if (/blob|binary|bytea|image/.test(dt)) return <Binary className="h-4 w-4 text-gray-500" />;
+  if (/json/.test(dt)) return <Braces className="h-4 w-4 text-gray-500" />;
+  return <Type className="h-4 w-4 text-gray-500" />;
+};
 
 export function ConnectionTree({ onNewConnection, onEditConnection }: ConnectionTreeProps) {
   const t = useT();
@@ -82,6 +107,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   const openDatabase = useWorkspaceStore((s) => s.openDatabase);
   const openTable = useWorkspaceStore((s) => s.openTable);
   const openView = useWorkspaceStore((s) => s.openView);
+  const openRoutine = useWorkspaceStore((s) => s.openRoutine);
   const openCreateTable = useWorkspaceStore((s) => s.openCreateTable);
   const openUsers = useWorkspaceStore((s) => s.openUsers);
   const openServer = useWorkspaceStore((s) => s.openServer);
@@ -136,10 +162,13 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             const parts = node.id.split("::");
             const connectionId = parts[0];
             const dbName = parts[2];
-            // 表与视图一起拉；视图查询失败不阻塞表列表
-            const [tables, views] = await Promise.all([
+            // 表/视图/触发器/存储过程/函数一起拉；任何一类失败不阻塞其他
+            const [tables, views, triggers, procedures, functions] = await Promise.all([
               tauriService.getTables(connectionId, dbName),
               tauriService.getViews(connectionId, dbName).catch(() => []),
+              tauriService.getTriggers(connectionId, dbName).catch(() => []),
+              tauriService.getProcedures(connectionId, dbName).catch(() => []),
+              tauriService.getFunctions(connectionId, dbName).catch(() => []),
             ]);
             children = tables.map((tb) => ({
               id: `${node.id}::table::${tb.name}`,
@@ -158,6 +187,49 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                   id: `${node.id}::view::${v.name}`,
                   type: "view" as const,
                   name: v.name,
+                })),
+              });
+            }
+            // 触发器 / 存储过程 / 函数分组（SQLite 无后两者，驱动返回空列表自然不显示）
+            if (triggers.length > 0) {
+              children.push({
+                id: `${node.id}::group::triggers`,
+                type: "folder" as const,
+                name: t("tree.triggersGroup", { count: triggers.length }),
+                metadata: { isGroup: true, groupKind: "triggers" },
+                children: triggers.map((tr) => ({
+                  id: `${node.id}::trigger::${tr.name}`,
+                  type: "trigger" as const,
+                  name: tr.name,
+                  metadata: tr.comment ? { comment: tr.comment } : undefined,
+                })),
+              });
+            }
+            if (procedures.length > 0) {
+              children.push({
+                id: `${node.id}::group::procedures`,
+                type: "folder" as const,
+                name: t("tree.proceduresGroup", { count: procedures.length }),
+                metadata: { isGroup: true, groupKind: "procedures" },
+                children: procedures.map((p) => ({
+                  id: `${node.id}::procedure::${p.name}`,
+                  type: "procedure" as const,
+                  name: p.name,
+                  metadata: p.comment ? { comment: p.comment } : undefined,
+                })),
+              });
+            }
+            if (functions.length > 0) {
+              children.push({
+                id: `${node.id}::group::functions`,
+                type: "folder" as const,
+                name: t("tree.functionsGroup", { count: functions.length }),
+                metadata: { isGroup: true, groupKind: "functions" },
+                children: functions.map((f) => ({
+                  id: `${node.id}::function::${f.name}`,
+                  type: "function" as const,
+                  name: f.name,
+                  metadata: f.comment ? { comment: f.comment } : undefined,
                 })),
               });
             }
@@ -316,7 +388,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         collapseNode(node.id);
       } else {
         expandNode(node.id);
-        if (!node.children && node.type !== "column" && node.type !== "index") {
+        if (!node.children && !isLeafType(node.type)) {
           loadChildren(node);
         }
       }
@@ -366,6 +438,19 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         setActiveConnection(connId);
         setSelectedDatabase(dbName);
         openView(connId, dbName, viewName);
+        return;
+      }
+      case "trigger":
+      case "procedure":
+      case "function": {
+        // 点击触发器/存储过程/函数：打开定义 tab（只读）
+        const parts = node.id.split("::");
+        const connId = parts[0];
+        const dbName = parts[2];
+        const objName = parts[parts.length - 1];
+        setActiveConnection(connId);
+        setSelectedDatabase(dbName);
+        openRoutine(connId, dbName, node.type, objName);
         return;
       }
       case "folder":
@@ -712,6 +797,48 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       ];
     }
 
+    if (node.type === "trigger" || node.type === "procedure" || node.type === "function") {
+      const connId = parts[0];
+      const dbName = parts[2];
+      const objName = parts[parts.length - 1];
+      const routineKind = node.type;
+      const driverType = getDriverType(connId);
+      const q = (n: string) => quoteIdent(n, driverType);
+      const dropKeyword =
+        routineKind === "trigger" ? "TRIGGER" : routineKind === "procedure" ? "PROCEDURE" : "FUNCTION";
+      return [
+        {
+          label: t("tree.viewDefinition"),
+          icon: <Eye className="h-3.5 w-3.5" />,
+          onClick: () => {
+            setActiveConnection(connId);
+            setSelectedDatabase(dbName);
+            openRoutine(connId, dbName, routineKind, objName);
+          },
+        },
+        {
+          label: t("tree.dropRoutine", { kind: t(`routineView.${routineKind}`) }),
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          danger: true,
+          onClick: () => {
+            if (!window.confirm(t("tree.confirmDropRoutine", { kind: t(`routineView.${routineKind}`), name: objName }))) return;
+            let sql = `DROP ${dropKeyword} ${q(objName)};`;
+            // PostgreSQL 删除触发器必须指定所属表（从列表加载时存的 comment 里取）
+            if (routineKind === "trigger" && (driverType === "postgres" || driverType === "postgresql")) {
+              const comment = node.metadata?.comment as string | undefined;
+              const table = comment?.startsWith("ON ") ? comment.slice(3) : undefined;
+              if (!table) {
+                setError(t("tree.dropRoutineFailed", { error: "missing trigger table" }));
+                return;
+              }
+              sql = `DROP TRIGGER ${q(objName)} ON ${q(table)};`;
+            }
+            runTableDdl(node, sql, "tree.dropRoutineFailed");
+          },
+        },
+      ];
+    }
+
     return [];
   };
 
@@ -745,17 +872,28 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         return <Table2 className="h-4 w-4 text-green-600" />;
       case "view":
         return <Eye className="h-4 w-4 text-teal-500" />;
+      case "trigger":
+        return <Zap className="h-4 w-4 text-amber-500" />;
+      case "procedure":
+        return <FileCog className="h-4 w-4 text-indigo-500" />;
+      case "function":
+        return <Sigma className="h-4 w-4 text-purple-500" />;
       case "column":
-        return node.metadata?.isPrimaryKey ? (
-          <Key className="h-4 w-4 text-yellow-500" />
-        ) : (
-          <Columns className="h-4 w-4 text-gray-500" />
-        );
+        if (node.metadata?.isPrimaryKey) {
+          return <Key className="h-4 w-4 text-yellow-500" />;
+        }
+        return columnTypeIcon(node.metadata?.dataType as string | undefined);
       case "index":
-        return <Columns className="h-4 w-4 text-purple-500" />;
+        return <ListOrdered className="h-4 w-4 text-purple-500" />;
       case "folder":
         return node.metadata?.groupKind === "views" ? (
           <Eye className="h-4 w-4 text-teal-500" />
+        ) : node.metadata?.groupKind === "triggers" ? (
+          <Zap className="h-4 w-4 text-amber-500" />
+        ) : node.metadata?.groupKind === "procedures" ? (
+          <FileCog className="h-4 w-4 text-indigo-500" />
+        ) : node.metadata?.groupKind === "functions" ? (
+          <Sigma className="h-4 w-4 text-purple-500" />
         ) : node.metadata?.isGroup ? (
           <Folder className="h-4 w-4 text-yellow-500" />
         ) : (
@@ -775,8 +913,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         node.id === `${activeConnection}::db::${selectedDatabase}`);
     const paddingLeft = depth * 16 + 8;
     const connected = node.type === "connection" && liveIds.has(node.id);
-    const isLeaf = node.type === "column" || node.type === "index";
-    const hasMenu = ["connection", "database", "table", "view"].includes(node.type);
+    const isLeaf = isLeafType(node.type);
+    const hasMenu = ["connection", "database", "table", "view", "trigger", "procedure", "function"].includes(node.type);
     const isSysDb =
       node.type === "database" &&
       isSystemDatabase(node.name, getDriverType(node.id.split("::")[0]));

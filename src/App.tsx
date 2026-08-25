@@ -13,10 +13,11 @@ import { DataGrid } from "@/components/result/DataGrid";
 import { DatabaseOverview } from "@/components/DatabaseOverview";
 import { TableView } from "@/components/TableView";
 import { ViewView } from "@/components/ViewView";
+import { RoutineView } from "@/components/RoutineView";
 import { UsersView } from "@/components/UsersView";
 import { ServerOverview } from "@/components/ServerOverview";
 import { CreateTableView } from "@/components/CreateTableView";
-import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages, ShieldCheck, Server } from "lucide-react";
+import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages, ShieldCheck, Server, ScrollText, Zap, FileCog, Sigma } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ContextMenu } from "@/components/ContextMenu";
 import { Resizer } from "@/components/ui/Resizer";
@@ -315,6 +316,14 @@ export default function App() {
                     <Plus className="h-3.5 w-3.5" />
                   ) : tab.kind === "view" ? (
                     <Eye className="h-3.5 w-3.5 text-teal-500" />
+                  ) : tab.kind === "routine" ? (
+                    tab.routineKind === "trigger" ? (
+                      <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    ) : tab.routineKind === "procedure" ? (
+                      <FileCog className="h-3.5 w-3.5 text-indigo-500" />
+                    ) : (
+                      <Sigma className="h-3.5 w-3.5 text-purple-500" />
+                    )
                   ) : tab.kind === "users" ? (
                     <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
                   ) : tab.kind === "server" ? (
@@ -366,6 +375,15 @@ export default function App() {
               onClick={toggleTheme}
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 flex-shrink-0"
+              title={t("app.openLogFolder")}
+              onClick={() => tauriService.openLogFolder().catch((e) => setError(String(e)))}
+            >
+              <ScrollText className="h-4 w-4" />
             </Button>
             <Button
               variant="ghost"
@@ -424,6 +442,14 @@ export default function App() {
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     view={activeWs.table}
+                  />
+                )}
+                {activeWs?.kind === "routine" && activeWs.database && activeWs.table && activeWs.routineKind && (
+                  <RoutineView
+                    connectionId={activeWs.connectionId}
+                    database={activeWs.database}
+                    routineKind={activeWs.routineKind}
+                    name={activeWs.table}
                   />
                 )}
                 {activeWs?.kind === "createTable" && activeWs.database && (

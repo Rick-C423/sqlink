@@ -22,6 +22,7 @@ const enUS: Record<MessageKey, string> = {
   "app.closeOthers": "Close Others",
   "app.closeAll": "Close All",
   "app.switchLanguage": "切换到中文",
+  "app.openLogFolder": "Open log folder",
 
   // ---------- Common ----------
   "common.refresh": "Refresh",
@@ -35,6 +36,9 @@ const enUS: Record<MessageKey, string> = {
   "tree.addHint": "Click + to add a connection",
   "tree.system": "system",
   "tree.viewsGroup": "Views ({count})",
+  "tree.triggersGroup": "Triggers ({count})",
+  "tree.proceduresGroup": "Procedures ({count})",
+  "tree.functionsGroup": "Functions ({count})",
   "tree.columnsGroup": "Columns ({count})",
   "tree.indexesGroup": "Indexes ({count})",
   "tree.loadFailed": "Load failed: {error}",
@@ -76,6 +80,10 @@ const enUS: Record<MessageKey, string> = {
   "tree.confirmDropView": "Drop view {name}? This cannot be undone!",
   "tree.dropViewFailed": "Drop view failed: {error}",
   "tree.serverOverview": "Server Overview",
+  "tree.viewDefinition": "View Definition",
+  "tree.dropRoutine": "Drop {kind}",
+  "tree.confirmDropRoutine": "Drop {kind} {name}? This cannot be undone!",
+  "tree.dropRoutineFailed": "Drop failed: {error}",
 
   // ---------- Server overview (ServerOverview.tsx) ----------
   "server.databases": "Databases ({count})",
@@ -299,6 +307,9 @@ const enUS: Record<MessageKey, string> = {
   "viewView.copy": "Copy",
   "viewView.loading": "Loading…",
   "viewView.noDefinition": "No definition",
+  "routineView.trigger": "Trigger",
+  "routineView.procedure": "Procedure",
+  "routineView.function": "Function",
 
   // ---------- Create table designer (CreateTableView.tsx) ----------
   "createTable.nameRequired": "Please enter a table name",

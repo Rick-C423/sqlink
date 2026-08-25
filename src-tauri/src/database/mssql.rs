@@ -255,6 +255,110 @@ impl DatabaseDriver for MsSqlDriver {
             .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 定义为空", view)))
     }
 
+    async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        // parent_id = 0 的是数据库级 DDL 触发器，其余挂在表/视图上
+        let stream = client.simple_query(
+            "SELECT t.name, SCHEMA_NAME(o.schema_id), COALESCE(o.name, 'DATABASE') \
+             FROM sys.triggers t LEFT JOIN sys.objects o ON t.parent_id = o.object_id \
+             ORDER BY t.name",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: &str = row.get(0).unwrap_or("");
+            let schema: Option<&str> = row.get(1);
+            let parent: &str = row.get(2).unwrap_or("");
+            TableInfo {
+                name: name.to_string(),
+                schema: schema.map(|s| s.to_string()),
+                row_count: None,
+                engine: None,
+                comment: Some(format!("ON {}", parent)),
+            }
+        }).collect())
+    }
+
+    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.query(
+            "SELECT TOP 1 OBJECT_DEFINITION(t.object_id) FROM sys.triggers t WHERE t.name = @P1",
+            &[&trigger],
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        rows.first()
+            .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
+            .ok_or_else(|| DatabaseError::Unknown(format!("触发器 {} 定义为空", trigger)))
+    }
+
+    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.simple_query(
+            "SELECT p.name, SCHEMA_NAME(p.schema_id) FROM sys.procedures p ORDER BY p.name",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: &str = row.get(0).unwrap_or("");
+            let schema: Option<&str> = row.get(1);
+            TableInfo {
+                name: name.to_string(),
+                schema: schema.map(|s| s.to_string()),
+                row_count: None,
+                engine: None,
+                comment: None,
+            }
+        }).collect())
+    }
+
+    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.query(
+            "SELECT TOP 1 OBJECT_DEFINITION(p.object_id) FROM sys.procedures p WHERE p.name = @P1",
+            &[&procedure],
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        rows.first()
+            .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
+            .ok_or_else(|| DatabaseError::Unknown(format!("存储过程 {} 定义为空", procedure)))
+    }
+
+    async fn get_functions(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        // FN = 标量函数, IF = 内联表值函数, TF = 多语句表值函数
+        let stream = client.simple_query(
+            "SELECT o.name, SCHEMA_NAME(o.schema_id), o.type \
+             FROM sys.objects o WHERE o.type IN ('FN', 'IF', 'TF') ORDER BY o.name",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: &str = row.get(0).unwrap_or("");
+            let schema: Option<&str> = row.get(1);
+            let kind: &str = row.get(2).unwrap_or("");
+            TableInfo {
+                name: name.to_string(),
+                schema: schema.map(|s| s.to_string()),
+                row_count: None,
+                engine: Some(kind.to_string()),
+                comment: None,
+            }
+        }).collect())
+    }
+
+    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.query(
+            "SELECT TOP 1 OBJECT_DEFINITION(o.object_id) FROM sys.objects o \
+             WHERE o.name = @P1 AND o.type IN ('FN', 'IF', 'TF')",
+            &[&function],
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+        rows.first()
+            .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
+            .ok_or_else(|| DatabaseError::Unknown(format!("函数 {} 定义为空", function)))
+    }
+
     async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         // 服务器级登录名：SQL 登录 + Windows 登录，排除系统内置

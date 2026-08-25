@@ -66,13 +66,49 @@ impl PgDriver {
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                eprintln!("postgres connection error: {}", e);
+                tracing::error!(error = %e, "PostgreSQL 连接后台任务出错");
             }
         });
 
         let client = Arc::new(client);
         guard.insert(db_name, Arc::clone(&client));
         Ok(client)
+    }
+
+    /// pg_proc 列表（prokind: 'p' = 存储过程, 'f' = 普通函数；需 PG 11+）
+    async fn get_routines(&self, database: Option<&str>, prokind: &str) -> Result<Vec<TableInfo>, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let rows = client.query(
+            "SELECT p.proname, pg_get_function_arguments(p.oid) \
+             FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname = 'public' AND p.prokind = $1 ORDER BY p.proname",
+            &[&prokind],
+        ).await.map_err(map_pg_query_error)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: String = row.get(0);
+            let args: String = row.get(1);
+            TableInfo {
+                name,
+                schema: Some("public".to_string()),
+                row_count: None,
+                engine: None,
+                comment: if args.is_empty() { None } else { Some(format!("({})", args)) },
+            }
+        }).collect())
+    }
+
+    /// pg_get_functiondef 对函数和存储过程都适用（重载时取第一个匹配）
+    async fn get_routine_definition(&self, database: Option<&str>, prokind: &str, name: &str) -> Result<String, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let row = client.query_opt(
+            "SELECT pg_get_functiondef(p.oid) \
+             FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname = 'public' AND p.proname = $1 AND p.prokind = $2 LIMIT 1",
+            &[&name, &prokind],
+        ).await.map_err(map_pg_query_error)?;
+        let def: Option<String> = row.and_then(|r| r.get(0));
+        def.ok_or_else(|| DatabaseError::Unknown(format!("过程/函数 {} 不存在", name)))
     }
 }
 
@@ -269,6 +305,61 @@ impl DatabaseDriver for PgDriver {
         let def: Option<String> = row.and_then(|r| r.get(0));
         def.map(|d| format!("CREATE OR REPLACE VIEW public.\"{}\" AS\n{}", view.replace('"', "\"\""), d))
             .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 不存在", view)))
+    }
+
+    async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let client = self.client_for(database).await?;
+        // tgisinternal = false 排除外键等约束内部触发器
+        let rows = client.query(
+            "SELECT t.tgname, c.relname \
+             FROM pg_trigger t \
+             JOIN pg_class c ON c.oid = t.tgrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = 'public' AND NOT t.tgisinternal ORDER BY t.tgname",
+            &[],
+        ).await.map_err(map_pg_query_error)?;
+
+        Ok(rows.iter().map(|row| {
+            let name: String = row.get(0);
+            let table: String = row.get(1);
+            TableInfo {
+                name,
+                schema: Some("public".to_string()),
+                row_count: None,
+                engine: None,
+                comment: Some(format!("ON {}", table)),
+            }
+        }).collect())
+    }
+
+    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let row = client.query_opt(
+            "SELECT pg_get_triggerdef(t.oid) \
+             FROM pg_trigger t \
+             JOIN pg_class c ON c.oid = t.tgrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = 'public' AND t.tgname = $1 AND NOT t.tgisinternal LIMIT 1",
+            &[&trigger],
+        ).await.map_err(map_pg_query_error)?;
+        let def: Option<String> = row.and_then(|r| r.get(0));
+        def.ok_or_else(|| DatabaseError::Unknown(format!("触发器 {} 不存在", trigger)))
+    }
+
+    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        self.get_routines(database, "p").await
+    }
+
+    async fn get_functions(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        self.get_routines(database, "f").await
+    }
+
+    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
+        self.get_routine_definition(database, "p", procedure).await
+    }
+
+    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
+        self.get_routine_definition(database, "f", function).await
     }
 
     async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {

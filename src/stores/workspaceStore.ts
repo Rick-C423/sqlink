@@ -2,7 +2,9 @@ import { create } from "zustand";
 import { useEditorStore } from "@/stores/editorStore";
 import { t } from "@/i18n";
 
-export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable" | "users" | "server";
+export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable" | "users" | "server" | "routine";
+
+export type RoutineKind = "trigger" | "procedure" | "function";
 
 export interface WorkspaceTab {
   id: string;
@@ -11,6 +13,8 @@ export interface WorkspaceTab {
   connectionId: string;
   database?: string;
   table?: string;
+  /** kind === "routine" 时的对象类型（触发器/存储过程/函数），对象名存在 table 字段 */
+  routineKind?: RoutineKind;
   /** kind === "query" 时对应的 editorStore tab id */
   editorTabId?: string;
 }
@@ -25,6 +29,8 @@ interface WorkspaceState {
   openTable: (connectionId: string, database: string, table: string) => void;
   /** 打开/聚焦视图 tab（数据只读 + 定义） */
   openView: (connectionId: string, database: string, view: string) => void;
+  /** 打开/聚焦触发器/存储过程/函数 tab（定义只读） */
+  openRoutine: (connectionId: string, database: string, routineKind: RoutineKind, name: string) => void;
   /** 打开/聚焦新建表设计器 tab（每个库一个） */
   openCreateTable: (connectionId: string, database: string) => void;
   /** 打开/聚焦用户与权限管理 tab（每个连接一个） */
@@ -110,6 +116,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         table: view,
       };
       const idx = insertIndexFor(state.tabs, "view");
+      const tabs = [...state.tabs];
+      tabs.splice(idx, 0, tab);
+      return { tabs, activeId: id };
+    });
+  },
+
+  openRoutine: (connectionId, database, routineKind, name) => {
+    const id = `routine::${routineKind}::${connectionId}::${database}::${name}`;
+    const existing = get().tabs.find((t) => t.id === id);
+    if (existing) {
+      set({ activeId: id });
+      return;
+    }
+    set((state) => {
+      const tab: WorkspaceTab = {
+        id,
+        kind: "routine",
+        title: name,
+        connectionId,
+        database,
+        table: name,
+        routineKind,
+      };
+      const idx = insertIndexFor(state.tabs, "routine");
       const tabs = [...state.tabs];
       tabs.splice(idx, 0, tab);
       return { tabs, activeId: id };

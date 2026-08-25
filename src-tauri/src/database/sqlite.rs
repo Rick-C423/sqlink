@@ -272,6 +272,59 @@ impl DatabaseDriver for SqliteDriver {
         }
     }
 
+    async fn get_triggers(&self, _database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
+            .map_err(map_err)?;
+        let triggers = stmt
+            .query_map([], |r| {
+                let name: String = r.get(0)?;
+                let table: String = r.get(1)?;
+                Ok(TableInfo {
+                    name,
+                    schema: Some("main".to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: Some(format!("ON {}", table)),
+                })
+            })
+            .map_err(map_err)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(triggers)
+    }
+
+    async fn get_trigger_definition(&self, _database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1")
+            .map_err(map_err)?;
+        let mut rows = stmt.query(rusqlite::params![trigger]).map_err(map_err)?;
+        match rows.next().map_err(map_err)? {
+            Some(row) => row.get::<_, String>(0).map_err(map_err),
+            None => Err(DatabaseError::Unknown(format!("触发器 {} 不存在", trigger))),
+        }
+    }
+
+    async fn get_procedures(&self, _database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        // SQLite 不支持存储过程
+        Ok(Vec::new())
+    }
+
+    async fn get_procedure_definition(&self, _database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
+        Err(DatabaseError::Unknown(format!("SQLite 不支持存储过程（{}）", procedure)))
+    }
+
+    async fn get_functions(&self, _database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        // SQLite 不支持自定义存储函数（内置函数不在此处列出）
+        Ok(Vec::new())
+    }
+
+    async fn get_function_definition(&self, _database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
+        Err(DatabaseError::Unknown(format!("SQLite 不支持存储函数（{}）", function)))
+    }
+
     async fn get_users(&self, _database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
         // SQLite 无账号体系
         Ok(Vec::new())

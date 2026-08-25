@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod database;
 pub mod history;
+pub mod logging;
 pub mod models;
 pub mod store;
 
@@ -36,6 +37,12 @@ pub fn run() {
             commands::query::schema_get_foreign_keys,
             commands::query::schema_get_views,
             commands::query::schema_get_view_definition,
+            commands::query::schema_get_triggers,
+            commands::query::schema_get_trigger_definition,
+            commands::query::schema_get_procedures,
+            commands::query::schema_get_procedure_definition,
+            commands::query::schema_get_functions,
+            commands::query::schema_get_function_definition,
             commands::query::schema_get_users,
             commands::query::schema_get_current_user,
             // SQL 转储导入
@@ -47,8 +54,21 @@ pub fn run() {
             commands::history::history_clear,
             // 窗口主题
             commands::window::set_window_theme,
+            // 日志
+            logging::open_log_folder,
         ])
         .setup(|app| {
+            // 日志初始化要最先做：后续初始化过程的失败才能进日志
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                if let Some(guard) = logging::init(&log_dir) {
+                    app.manage(guard);
+                    tracing::info!(
+                        version = env!("CARGO_PKG_VERSION"),
+                        log_dir = %log_dir.display(),
+                        "SQLink 启动"
+                    );
+                }
+            }
             // 初始化数据库连接池管理器（含本地持久化存储）
             let config_dir = app.path().app_config_dir().ok();
             app.manage(database::pool::ConnectionPoolManager::new(config_dir));

@@ -16,17 +16,42 @@ pub async fn query_execute(
     let driver = manager.get_connection(&connection_id).await
         .map_err(|e| e.to_string())?;
 
+    // 语句类型用于日志（SELECT/INSERT/…），不记完整 SQL，避免敏感数据进日志
+    let sql_kind = sql.split_whitespace().next().unwrap_or("").to_uppercase();
+
     let result = if returns_rows(&sql) {
         driver.query(&sql, database.as_deref(), query_id).await
     } else {
         driver.execute(&sql, database.as_deref(), query_id).await
-    }
-    .map_err(|e| e.to_string())?;
+    };
 
-    if record == Some(true) {
-        manager.record_history(&connection_id, database.as_deref(), &sql, &result);
+    match result {
+        Ok(r) => {
+            if r.execution_time_ms > 2000 {
+                tracing::warn!(
+                    conn = %connection_id, db = ?database, kind = %sql_kind,
+                    ms = r.execution_time_ms, "慢查询"
+                );
+            } else {
+                tracing::debug!(
+                    conn = %connection_id, db = ?database, kind = %sql_kind,
+                    ms = r.execution_time_ms, rows_affected = ?r.rows_affected,
+                    truncated = r.truncated, "查询完成"
+                );
+            }
+            if record == Some(true) {
+                manager.record_history(&connection_id, database.as_deref(), &sql, &r);
+            }
+            Ok(r)
+        }
+        Err(e) => {
+            tracing::error!(
+                conn = %connection_id, db = ?database, kind = %sql_kind,
+                error = %e, "查询失败"
+            );
+            Err(e.to_string())
+        }
     }
-    Ok(result)
 }
 
 #[tauri::command]
@@ -144,6 +169,75 @@ pub async fn schema_get_view_definition(
     let driver = manager.get_connection(&connection_id).await
         .map_err(|e| e.to_string())?;
     driver.get_view_definition(database.as_deref(), &view).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_triggers(
+    connection_id: String,
+    database: Option<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<Vec<TableInfo>, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_triggers(database.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_trigger_definition(
+    connection_id: String,
+    database: Option<String>,
+    trigger: String,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<String, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_trigger_definition(database.as_deref(), &trigger).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_procedures(
+    connection_id: String,
+    database: Option<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<Vec<TableInfo>, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_procedures(database.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_procedure_definition(
+    connection_id: String,
+    database: Option<String>,
+    procedure: String,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<String, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_procedure_definition(database.as_deref(), &procedure).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_functions(
+    connection_id: String,
+    database: Option<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<Vec<TableInfo>, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_functions(database.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn schema_get_function_definition(
+    connection_id: String,
+    database: Option<String>,
+    function: String,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<String, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_function_definition(database.as_deref(), &function).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

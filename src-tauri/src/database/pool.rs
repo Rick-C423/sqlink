@@ -22,7 +22,7 @@ impl ConnectionPoolManager {
             match ConnectionStore::new(dir) {
                 Ok(s) => Some(s),
                 Err(e) => {
-                    eprintln!("连接存储初始化失败（持久化不可用）: {}", e);
+                    tracing::error!(error = %e, "连接存储初始化失败（持久化不可用）");
                     None
                 }
             }
@@ -42,7 +42,17 @@ impl ConnectionPoolManager {
             self.disconnect(&id).await.ok();
         }
 
-        let driver = create_and_connect_driver(&config).await?;
+        // 只记元信息，绝不记密码/完整连接串
+        let driver = create_and_connect_driver(&config).await.inspect_err(|e| {
+            tracing::warn!(
+                driver = %config.driver_type, host = %config.host, port = config.port,
+                db = ?config.database, error = %e, "连接失败"
+            );
+        })?;
+        tracing::info!(
+            id = %id, driver = %config.driver_type, host = %config.host,
+            port = config.port, db = ?config.database, "连接成功"
+        );
 
         self.configs.write().await.insert(id.clone(), config);
         self.connections.write().await.insert(id.clone(), driver);
@@ -60,6 +70,7 @@ impl ConnectionPoolManager {
         let config = self.store.as_ref()
             .and_then(|s| s.get_decrypted(id).ok().flatten())
             .ok_or(DatabaseError::ConnectionClosed)?;
+        tracing::info!(id = %id, "活动连接不存在，用已保存配置自动重连");
         let driver = create_and_connect_driver(&config).await?;
         self.configs.write().await.insert(id.to_string(), config);
         self.connections.write().await.insert(id.to_string(), driver.clone());
@@ -72,6 +83,7 @@ impl ConnectionPoolManager {
         // 显式关闭底层连接池，避免 TCP 连接泄漏
         if let Some(driver) = driver {
             driver.disconnect().await?;
+            tracing::info!(id = %id, "连接已断开");
         }
         Ok(())
     }
@@ -146,7 +158,7 @@ impl ConnectionPoolManager {
             truncated: result.truncated,
         };
         if let Err(e) = history.append(entry) {
-            eprintln!("记录查询历史失败: {}", e);
+            tracing::warn!(error = %e, "记录查询历史失败");
         }
     }
 

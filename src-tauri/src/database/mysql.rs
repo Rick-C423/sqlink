@@ -56,6 +56,68 @@ impl MySqlDriver {
             active_queries: Arc::new(Mutex::new(HashMap::new())),
         })
     }
+
+    /// information_schema.ROUTINES 列表（routine_type 为 'PROCEDURE' 或 'FUNCTION'）
+    async fn get_routines(&self, database: Option<&str>, routine_type: &str) -> Result<Vec<TableInfo>, DatabaseError> {
+        let sql = match database {
+            Some(db) => format!(
+                "SELECT ROUTINE_NAME, ROUTINE_COMMENT FROM information_schema.ROUTINES \
+                 WHERE ROUTINE_SCHEMA = '{}' AND ROUTINE_TYPE = '{}' ORDER BY ROUTINE_NAME",
+                db.replace('\\', "\\\\").replace('\'', "\\'"),
+                routine_type
+            ),
+            None => format!(
+                "SELECT ROUTINE_NAME, ROUTINE_COMMENT FROM information_schema.ROUTINES \
+                 WHERE ROUTINE_SCHEMA = DATABASE() AND ROUTINE_TYPE = '{}' ORDER BY ROUTINE_NAME",
+                routine_type
+            ),
+        };
+        let result = self.query(&sql, None, None).await?;
+        Ok(result.rows.iter()
+            .filter_map(|row| {
+                let name = row.values.first()
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())?;
+                let comment = row.values.get(1)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                Some(TableInfo {
+                    name: name.to_string(),
+                    schema: database.map(|d| d.to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment,
+                })
+            })
+            .collect())
+    }
+
+    /// SHOW CREATE PROCEDURE / FUNCTION 取定义（第 3 列是创建语句）
+    async fn get_routine_definition(&self, database: Option<&str>, routine_type: &str, name: &str) -> Result<String, DatabaseError> {
+        let sql = match database {
+            Some(db) => format!(
+                "SHOW CREATE {} `{}`.`{}`",
+                routine_type,
+                self.escape_identifier(db),
+                self.escape_identifier(name)
+            ),
+            None => format!(
+                "SHOW CREATE {} `{}`",
+                routine_type,
+                self.escape_identifier(name)
+            ),
+        };
+        let result = self.query(&sql, None, None).await?;
+        // SHOW CREATE PROCEDURE 返回: Procedure | sql_mode | Create Procedure | ...
+        result.rows.first()
+            .and_then(|r| r.values.get(2))
+            .and_then(|v| v.as_ref())
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| DatabaseError::Unknown(format!("{} {} 定义为空", routine_type, name)))
+    }
 }
 
 pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseError> {
@@ -313,6 +375,74 @@ impl DatabaseDriver for MySqlDriver {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 定义为空", view)))
+    }
+
+    async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        let sql = match database {
+            Some(db) => format!(
+                "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION \
+                 FROM information_schema.TRIGGERS \
+                 WHERE TRIGGER_SCHEMA = '{}' ORDER BY TRIGGER_NAME",
+                db.replace('\\', "\\\\").replace('\'', "\\'")
+            ),
+            None => "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION \
+                     FROM information_schema.TRIGGERS \
+                     WHERE TRIGGER_SCHEMA = DATABASE() ORDER BY TRIGGER_NAME"
+                .to_string(),
+        };
+        let result = self.query(&sql, None, None).await?;
+        Ok(result.rows.iter()
+            .filter_map(|row| {
+                let name = row.values.first()
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())?;
+                let table = row.values.get(1).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).unwrap_or("");
+                let timing = row.values.get(2).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).unwrap_or("");
+                let event = row.values.get(3).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).unwrap_or("");
+                Some(TableInfo {
+                    name: name.to_string(),
+                    schema: database.map(|d| d.to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: Some(format!("{} {} ON {}", timing, event, table)),
+                })
+            })
+            .collect())
+    }
+
+    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+        let sql = match database {
+            Some(db) => format!(
+                "SHOW CREATE TRIGGER `{}`.`{}`",
+                self.escape_identifier(db),
+                self.escape_identifier(trigger)
+            ),
+            None => format!("SHOW CREATE TRIGGER `{}`", self.escape_identifier(trigger)),
+        };
+        let result = self.query(&sql, None, None).await?;
+        // SHOW CREATE TRIGGER 返回: Trigger | sql_mode | SQL Original Statement | ...
+        result.rows.first()
+            .and_then(|r| r.values.get(2))
+            .and_then(|v| v.as_ref())
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| DatabaseError::Unknown(format!("触发器 {} 定义为空", trigger)))
+    }
+
+    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        self.get_routines(database, "PROCEDURE").await
+    }
+
+    async fn get_functions(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+        self.get_routines(database, "FUNCTION").await
+    }
+
+    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
+        self.get_routine_definition(database, "PROCEDURE", procedure).await
+    }
+
+    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
+        self.get_routine_definition(database, "FUNCTION", function).await
     }
 
     async fn get_users(&self, _database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {

@@ -24,6 +24,7 @@ const zhCN = {
   "app.closeOthers": "关闭其他",
   "app.closeAll": "关闭全部",
   "app.switchLanguage": "Switch to English",
+  "app.openLogFolder": "打开日志目录",
 
   // ---------- 通用 ----------
   "common.refresh": "刷新",
@@ -37,6 +38,9 @@ const zhCN = {
   "tree.addHint": "点击 + 添加数据库连接",
   "tree.system": "系统",
   "tree.viewsGroup": "视图 ({count})",
+  "tree.triggersGroup": "触发器 ({count})",
+  "tree.proceduresGroup": "存储过程 ({count})",
+  "tree.functionsGroup": "函数 ({count})",
   "tree.columnsGroup": "列 ({count})",
   "tree.indexesGroup": "索引 ({count})",
   "tree.loadFailed": "加载失败: {error}",
@@ -78,6 +82,10 @@ const zhCN = {
   "tree.confirmDropView": "确定删除视图 {name} 吗？此操作不可恢复！",
   "tree.dropViewFailed": "删除视图失败: {error}",
   "tree.serverOverview": "服务器概览",
+  "tree.viewDefinition": "查看定义",
+  "tree.dropRoutine": "删除{kind}",
+  "tree.confirmDropRoutine": "确定删除{kind} {name} 吗？此操作不可恢复！",
+  "tree.dropRoutineFailed": "删除失败: {error}",
 
   // ---------- 服务器概览（ServerOverview.tsx） ----------
   "server.databases": "数据库 ({count})",
@@ -301,6 +309,9 @@ const zhCN = {
   "viewView.copy": "复制",
   "viewView.loading": "加载中…",
   "viewView.noDefinition": "无定义",
+  "routineView.trigger": "触发器",
+  "routineView.procedure": "存储过程",
+  "routineView.function": "函数",
 
   // ---------- 新建表设计器（CreateTableView.tsx） ----------
   "createTable.nameRequired": "请输入表名",

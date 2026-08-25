@@ -26,6 +26,18 @@ pub trait DatabaseDriver: Send + Sync {
     async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 视图的创建定义 SQL（只读展示用）
     async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError>;
+    /// 触发器列表（comment 字段附带目标表/事件说明，驱动不支持时返回空列表）
+    async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
+    /// 触发器的创建定义 SQL（只读展示用）
+    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError>;
+    /// 存储过程列表（驱动不支持时返回空列表，如 SQLite）
+    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
+    /// 存储过程的创建定义 SQL（只读展示用）
+    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError>;
+    /// 函数列表（驱动不支持时返回空列表，如 SQLite）
+    async fn get_functions(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
+    /// 函数的创建定义 SQL（只读展示用）
+    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError>;
     /// 账号列表（服务器级；database 仅用于选择连接上下文）
     async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError>;
     /// 当前会话用户及其授权（可读文本列表）

@@ -25,6 +25,11 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 
+# 日志（tracing + 按天滚动文件落盘）
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
 # 连接配置持久化（密码 AES-256-GCM 加密）
 aes-gcm = "0.10"
 base64 = "0.22"

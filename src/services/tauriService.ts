@@ -141,6 +141,30 @@ export const tauriService = {
     return await invoke("schema_get_view_definition", { connectionId, database, view });
   },
 
+  async getTriggers(connectionId: string, database?: string): Promise<TableInfo[]> {
+    return await invoke("schema_get_triggers", { connectionId, database });
+  },
+
+  async getTriggerDefinition(connectionId: string, database: string | undefined, trigger: string): Promise<string> {
+    return await invoke("schema_get_trigger_definition", { connectionId, database, trigger });
+  },
+
+  async getProcedures(connectionId: string, database?: string): Promise<TableInfo[]> {
+    return await invoke("schema_get_procedures", { connectionId, database });
+  },
+
+  async getProcedureDefinition(connectionId: string, database: string | undefined, procedure: string): Promise<string> {
+    return await invoke("schema_get_procedure_definition", { connectionId, database, procedure });
+  },
+
+  async getFunctions(connectionId: string, database?: string): Promise<TableInfo[]> {
+    return await invoke("schema_get_functions", { connectionId, database });
+  },
+
+  async getFunctionDefinition(connectionId: string, database: string | undefined, func: string): Promise<string> {
+    return await invoke("schema_get_function_definition", { connectionId, database, function: func });
+  },
+
   async getUsers(connectionId: string, database?: string): Promise<DbUserInfo[]> {
     return await invoke("schema_get_users", { connectionId, database });
   },
@@ -159,5 +183,10 @@ export const tauriService = {
 
   async getForeignKeys(connectionId: string, database: string | undefined, table: string): Promise<ForeignKeyInfo[]> {
     return await invoke("schema_get_foreign_keys", { connectionId, database, table });
+  },
+
+  /** 在系统文件管理器中打开日志目录 */
+  async openLogFolder(): Promise<void> {
+    await invoke("open_log_folder");
   },
 };
