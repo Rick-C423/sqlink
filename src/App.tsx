@@ -435,6 +435,8 @@ export default function App() {
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     table={activeWs.table}
+                    initialSubTab={activeWs.tableSubTab}
+                    subTabNonce={activeWs.subTabNonce}
                   />
                 )}
                 {activeWs?.kind === "view" && activeWs.database && activeWs.table && (

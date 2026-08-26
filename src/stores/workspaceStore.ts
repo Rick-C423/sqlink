@@ -6,6 +6,9 @@ export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "create
 
 export type RoutineKind = "trigger" | "procedure" | "function";
 
+/** 表视图子页：数据 / 结构 */
+export type TableSubTab = "data" | "structure";
+
 export interface WorkspaceTab {
   id: string;
   kind: WorkspaceTabKind;
@@ -13,6 +16,10 @@ export interface WorkspaceTab {
   connectionId: string;
   database?: string;
   table?: string;
+  /** kind === "table" 时要打开的子页（数据/结构），由打开入口指定 */
+  tableSubTab?: TableSubTab;
+  /** 已打开的表 tab 被再次指定子页时递增，驱动 TableView 切换子页 */
+  subTabNonce?: number;
   /** kind === "routine" 时的对象类型（触发器/存储过程/函数），对象名存在 table 字段 */
   routineKind?: RoutineKind;
   /** kind === "query" 时对应的 editorStore tab id */
@@ -25,8 +32,8 @@ interface WorkspaceState {
 
   /** 打开/聚焦数据库概览 tab */
   openDatabase: (connectionId: string, database: string) => void;
-  /** 打开/聚焦表视图 tab */
-  openTable: (connectionId: string, database: string, table: string) => void;
+  /** 打开/聚焦表视图 tab；subTab 指定落到「数据」还是「结构」子页 */
+  openTable: (connectionId: string, database: string, table: string, subTab?: TableSubTab) => void;
   /** 打开/聚焦视图 tab（数据只读 + 定义） */
   openView: (connectionId: string, database: string, view: string) => void;
   /** 打开/聚焦触发器/存储过程/函数 tab（定义只读） */
@@ -76,11 +83,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
-  openTable: (connectionId, database, table) => {
+  openTable: (connectionId, database, table, subTab) => {
     const id = `table::${connectionId}::${database}::${table}`;
     const existing = get().tabs.find((t) => t.id === id);
     if (existing) {
-      set({ activeId: id });
+      if (subTab) {
+        // tab 已打开：聚焦并切换到指定子页（nonce 驱动 TableView 同步）
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === id
+              ? { ...t, tableSubTab: subTab, subTabNonce: (t.subTabNonce ?? 0) + 1 }
+              : t
+          ),
+          activeId: id,
+        }));
+      } else {
+        set({ activeId: id });
+      }
       return;
     }
     set((state) => {
@@ -91,6 +110,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         connectionId,
         database,
         table,
+        tableSubTab: subTab ?? "data",
       };
       const idx = insertIndexFor(state.tabs, "table");
       const tabs = [...state.tabs];

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Check, Filter, Loader2, Plus, RefreshCw, RotateCcw, Key, Undo2, X } from "lucide-react";
 import { useT } from "@/i18n";
+import type { TableSubTab } from "@/stores/workspaceStore";
 
 interface TableViewProps {
   connectionId: string;
@@ -16,14 +17,27 @@ interface TableViewProps {
   table: string;
   /** 视图等只读对象：禁用网格编辑 */
   readonly?: boolean;
+  /** 初始子页（数据/结构），由打开入口（如右键菜单）指定 */
+  initialSubTab?: TableSubTab;
+  /** 已打开的 tab 被再次指定子页时递增，触发子页切换 */
+  subTabNonce?: number;
 }
 
-type SubTab = "data" | "structure";
+type SubTab = TableSubTab;
 
 /** 表视图：数据（可编辑/删除/新增） + 结构（可编辑的表结构设计器） */
-export function TableView({ connectionId, database, table }: TableViewProps) {
+export function TableView({ connectionId, database, table, initialSubTab, subTabNonce }: TableViewProps) {
   const t = useT();
-  const [subTab, setSubTab] = useState<SubTab>("data");
+  const [subTab, setSubTab] = useState<SubTab>(initialSubTab ?? "data");
+
+  // tab 已处于打开状态时，右键「查数据 / 编辑结构」通过 nonce 驱动子页切换
+  useEffect(() => {
+    if (subTabNonce !== undefined && initialSubTab) {
+      setSubTab(initialSubTab);
+    }
+    // 只在 nonce 变化时同步，用户手动切换子页不受影响
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subTabNonce]);
 
   return (
     <div className="flex flex-col h-full">

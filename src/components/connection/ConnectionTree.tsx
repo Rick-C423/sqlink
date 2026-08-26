@@ -15,6 +15,7 @@ import type { MessageKey } from "@/i18n/zh-CN";
 import {
   ChevronRight,
   ChevronDown,
+  Columns3,
   Database,
   Table2,
   Type,
@@ -247,6 +248,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::folder::columns`,
                 type: "folder" as const,
                 name: t("tree.columnsGroup", { count: columns.length }),
+                metadata: { isGroup: true, groupKind: "columns" },
                 children: columns.map((col) => ({
                   id: `${node.id}::col::${col.name}`,
                   type: "column" as const,
@@ -274,6 +276,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::folder::columns`,
                 type: "folder" as const,
                 name: t("tree.columnsGroup", { count: columns.length }),
+                metadata: { isGroup: true, groupKind: "columns" },
                 children: columns.map((col) => ({
                   id: `${node.id}::col::${col.name}`,
                   type: "column" as const,
@@ -285,6 +288,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::folder::indexes`,
                 type: "folder" as const,
                 name: t("tree.indexesGroup", { count: indexes.length }),
+                metadata: { isGroup: true, groupKind: "indexes" },
                 children: indexes.map((idx) => ({
                   id: `${node.id}::idx::${idx.name}`,
                   type: "index" as const,
@@ -661,7 +665,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         {
           label: t("tree.viewData"),
           icon: <Eye className="h-3.5 w-3.5" />,
-          onClick: () => openTable(connId, dbName, tableName),
+          onClick: () => openTable(connId, dbName, tableName, "data"),
         },
         {
           label: t("tree.newQuerySelect"),
@@ -680,7 +684,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         {
           label: t("tree.designTable"),
           icon: <Wrench className="h-3.5 w-3.5" />,
-          onClick: () => openTable(connId, dbName, tableName), // 打开后切到结构页由用户选择
+          onClick: () => openTable(connId, dbName, tableName, "structure"),
         },
         {
           label: t("tree.renameTable"),
@@ -894,10 +898,12 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           <FileCog className="h-4 w-4 text-indigo-500" />
         ) : node.metadata?.groupKind === "functions" ? (
           <Sigma className="h-4 w-4 text-purple-500" />
-        ) : node.metadata?.isGroup ? (
-          <Folder className="h-4 w-4 text-yellow-500" />
+        ) : node.metadata?.groupKind === "columns" ? (
+          <Columns3 className="h-4 w-4 text-sky-500" />
+        ) : node.metadata?.groupKind === "indexes" ? (
+          <ListOrdered className="h-4 w-4 text-purple-500" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-gray-400" />
+          <Folder className="h-4 w-4 text-yellow-500" />
         );
       default:
         return null;
@@ -937,7 +943,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         >
           {!isLeaf && (
             <span
-              className="w-4 h-4 mr-1 flex items-center justify-center"
+              className="w-4 h-4 mr-1 flex items-center justify-center flex-shrink-0"
               onClick={(e) => {
                 e.stopPropagation();
                 // 未连接的连接节点：点箭头直接自动建连并展开，而不是报"连接已关闭"
@@ -957,15 +963,16 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               )}
             </span>
           )}
-          {getNodeIcon(node)}
-          <span className={`truncate ml-1.5 ${isSysDb ? "text-gray-400" : ""}`}>{node.name}</span>
+          {/* 图标外包一层 shrink-0：表名过长时 flex 挤压只作用于名称，图标保持 16px 不被压扁 */}
+          <span className="flex-shrink-0 flex items-center">{getNodeIcon(node)}</span>
+          <span className={`truncate ml-1.5 min-w-0 ${isSysDb ? "text-gray-400" : ""}`}>{node.name}</span>
           {isSysDb && (
             <span className="ml-1.5 text-[10px] px-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex-shrink-0">
               {t("tree.system")}
             </span>
           )}
           {node.metadata?.rowCount !== undefined && node.metadata?.rowCount !== null && (
-            <span className="ml-2 text-xs text-gray-400">
+            <span className="ml-2 text-xs text-gray-400 flex-shrink-0">
               {Number(node.metadata.rowCount).toLocaleString()}
             </span>
           )}
