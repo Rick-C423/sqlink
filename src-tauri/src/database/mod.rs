@@ -21,6 +21,15 @@ pub trait DatabaseDriver: Send + Sync {
     async fn cancel_query(&self, query_id: u64) -> Result<(), DatabaseError>;
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError>;
+    /// 返回完整数据库列表及访问状态；默认驱动返回的数据库均视为可访问。
+    async fn get_database_infos(&self) -> Result<Vec<DatabaseInfo>, DatabaseError> {
+        Ok(self
+            .get_databases()
+            .await?
+            .into_iter()
+            .map(|name| DatabaseInfo { name, accessible: true })
+            .collect())
+    }
     async fn get_tables(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 视图列表（不含表；row_count/engine 一般无值）
     async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;

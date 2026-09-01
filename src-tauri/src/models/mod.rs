@@ -11,6 +11,8 @@ pub struct ConnectionConfig {
     pub user: String,
     pub password: String,
     pub database: Option<String>,
+    /// SQL Server 是否启用 TLS；旧配置缺省为 false，避免先等待 TLS 握手失败。
+    pub encrypt: Option<bool>,
     pub save_password: Option<bool>,
     pub group_name: Option<String>,
     pub color: Option<String>,
@@ -53,6 +55,14 @@ pub struct TableInfo {
     pub row_count: Option<i64>,
     pub engine: Option<String>,
     pub comment: Option<String>,
+}
+
+/// 数据库名称及当前登录名是否有权访问。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseInfo {
+    pub name: String,
+    pub accessible: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

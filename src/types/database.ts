@@ -7,6 +7,8 @@ export interface ConnectionConfig {
   user: string;
   password: string;
   database: string;
+  /** SQL Server TLS 加密开关；缺省按 false 处理。 */
+  encrypt?: boolean;
   savePassword?: boolean;
   groupName?: string;
   color?: string;
@@ -42,6 +44,11 @@ export interface TableInfo {
   rowCount?: number;
   engine?: string;
   comment?: string;
+}
+
+export interface DatabaseInfo {
+  name: string;
+  accessible: boolean;
 }
 
 /** SQL 转储导入结果汇总 */

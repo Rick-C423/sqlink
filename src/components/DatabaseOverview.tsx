@@ -22,6 +22,8 @@ export function DatabaseOverview({ connectionId, database }: DatabaseOverviewPro
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // 切换数据库或刷新时先清空旧结果，加载失败不能展示上一个库的表。
+    setTables(null);
     try {
       const list = await tauriService.getTables(connectionId, database);
       setTables(list);

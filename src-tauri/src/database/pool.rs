@@ -1,30 +1,31 @@
+use crate::database::{create_and_connect_driver, DatabaseDriver};
+use crate::history::HistoryStore;
+use crate::models::*;
+use crate::store::ConnectionStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use crate::database::{DatabaseDriver, create_and_connect_driver};
-use crate::history::HistoryStore;
-use crate::models::*;
-use crate::store::ConnectionStore;
 
+#[derive(Clone)]
 pub struct ConnectionPoolManager {
     connections: Arc<RwLock<HashMap<String, Arc<dyn DatabaseDriver>>>>,
     pub(crate) configs: Arc<RwLock<HashMap<String, ConnectionConfig>>>,
-    store: Option<ConnectionStore>,
-    history: Option<HistoryStore>,
+    store: Option<Arc<ConnectionStore>>,
+    history: Option<Arc<HistoryStore>>,
 }
 
 impl ConnectionPoolManager {
     pub fn new(config_dir: Option<PathBuf>) -> Self {
-        let history = config_dir.as_ref().map(|dir| HistoryStore::new(dir.clone()));
-        let store = config_dir.and_then(|dir| {
-            match ConnectionStore::new(dir) {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    tracing::error!(error = %e, "连接存储初始化失败（持久化不可用）");
-                    None
-                }
+        let history = config_dir
+            .as_ref()
+            .map(|dir| Arc::new(HistoryStore::new(dir.clone())));
+        let store = config_dir.and_then(|dir| match ConnectionStore::new(dir) {
+            Ok(s) => Some(Arc::new(s)),
+            Err(e) => {
+                tracing::error!(error = %e, "连接存储初始化失败（持久化不可用）");
+                None
             }
         });
         Self {
@@ -35,8 +36,14 @@ impl ConnectionPoolManager {
         }
     }
 
-    pub async fn create_connection(&self, config: ConnectionConfig) -> Result<String, DatabaseError> {
-        let id = config.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
+    pub async fn create_connection(
+        &self,
+        config: ConnectionConfig,
+    ) -> Result<String, DatabaseError> {
+        let id = config
+            .id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
 
         if self.connections.read().await.contains_key(&id) {
             self.disconnect(&id).await.ok();
@@ -67,13 +74,18 @@ impl ConnectionPoolManager {
         }
         // 活动连接不存在（应用重启 / 被服务端断开）：用已保存配置自动重连，
         // 避免向前端抛"连接已关闭"——用户感知不到中断
-        let config = self.store.as_ref()
+        let config = self
+            .store
+            .as_ref()
             .and_then(|s| s.get_decrypted(id).ok().flatten())
             .ok_or(DatabaseError::ConnectionClosed)?;
         tracing::info!(id = %id, "活动连接不存在，用已保存配置自动重连");
         let driver = create_and_connect_driver(&config).await?;
         self.configs.write().await.insert(id.to_string(), config);
-        self.connections.write().await.insert(id.to_string(), driver.clone());
+        self.connections
+            .write()
+            .await
+            .insert(id.to_string(), driver.clone());
         Ok(driver)
     }
 
@@ -90,18 +102,26 @@ impl ConnectionPoolManager {
 
     pub async fn list_connections(&self) -> Vec<(String, ConnectionConfig)> {
         let configs = self.configs.read().await;
-        configs.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        configs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     // ---------- 持久化 ----------
 
     fn require_store(&self) -> Result<&ConnectionStore, DatabaseError> {
-        self.store.as_ref()
+        self.store
+            .as_ref()
+            .map(Arc::as_ref)
             .ok_or_else(|| DatabaseError::Unknown("连接持久化存储不可用".into()))
     }
 
     /// 保存连接配置到磁盘（密码加密），并按保存的 id 建立活动连接
-    pub async fn save_and_connect(&self, mut config: ConnectionConfig) -> Result<String, DatabaseError> {
+    pub async fn save_and_connect(
+        &self,
+        mut config: ConnectionConfig,
+    ) -> Result<String, DatabaseError> {
         if config.id.is_none() {
             config.id = Some(Uuid::new_v4().to_string());
         }
@@ -116,7 +136,9 @@ impl ConnectionPoolManager {
 
     /// 用已保存的配置建立活动连接（密码在后端解密，不下发前端）
     pub async fn connect_saved(&self, id: &str) -> Result<String, DatabaseError> {
-        let config = self.require_store()?.get_decrypted(id)?
+        let config = self
+            .require_store()?
+            .get_decrypted(id)?
             .ok_or_else(|| DatabaseError::Unknown(format!("连接不存在: {}", id)))?;
         self.create_connection(config).await
     }
@@ -129,7 +151,9 @@ impl ConnectionPoolManager {
 
     /// 更新已保存连接：密码留空则保留原密码；更新后断开活动连接（前端需重新点击连接）
     pub async fn update_saved(&self, config: ConnectionConfig) -> Result<(), DatabaseError> {
-        let id = config.id.clone()
+        let id = config
+            .id
+            .clone()
             .ok_or_else(|| DatabaseError::Unknown("更新连接缺少 id".into()))?;
         let mut cfg = config;
         if cfg.password.is_empty() {
@@ -145,7 +169,13 @@ impl ConnectionPoolManager {
     // ---------- 查询历史 ----------
 
     /// 记录一条执行成功的查询（编辑器手动执行的才进来）
-    pub fn record_history(&self, connection_id: &str, database: Option<&str>, sql: &str, result: &QueryResult) {
+    pub fn record_history(
+        &self,
+        connection_id: &str,
+        database: Option<&str>,
+        sql: &str,
+        result: &QueryResult,
+    ) {
         let Some(history) = &self.history else { return };
         let entry = HistoryEntry {
             id: Uuid::new_v4().to_string(),
@@ -154,7 +184,9 @@ impl ConnectionPoolManager {
             sql: sql.to_string(),
             executed_at: chrono::Utc::now().timestamp_millis(),
             duration_ms: result.execution_time_ms,
-            row_count: result.rows_affected.or(result.total_count.map(|n| n as u64)),
+            row_count: result
+                .rows_affected
+                .or(result.total_count.map(|n| n as u64)),
             truncated: result.truncated,
         };
         if let Err(e) = history.append(entry) {

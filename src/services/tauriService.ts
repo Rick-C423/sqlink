@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ConnectionConfig, QueryResult, TableInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo } from "@/types/database";
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo } from "@/types/database";
 
 export const tauriService = {
   // 连接管理
@@ -127,6 +127,10 @@ export const tauriService = {
   // Schema
   async getDatabases(connectionId: string): Promise<string[]> {
     return await invoke("schema_get_databases", { connectionId });
+  },
+
+  async getDatabaseInfos(connectionId: string): Promise<DatabaseInfo[]> {
+    return await invoke("schema_get_database_infos", { connectionId });
   },
 
   async getTables(connectionId: string, database?: string): Promise<TableInfo[]> {

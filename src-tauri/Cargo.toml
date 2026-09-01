@@ -4,7 +4,7 @@ version = "0.1.3"
 description = "SQLink - 数据库管理工具"
 authors = ["SQLink Team"]
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.85"
 
 [lib]
 name = "sqlconnect_lib"
@@ -46,6 +46,12 @@ tokio-util = { version = "0.7", features = ["compat"] }
 # GBK/GB18030 列解码（MySQL 老库常见）
 encoding_rs = "0.8"
 
+# 内置 MCP Streamable HTTP 服务（固定在兼容 Rust 1.78 的 SDK 版本）
+rmcp = { version = "=1.7.0", features = ["server", "macros", "transport-streamable-http-server"] }
+rmcp-macros = "=1.7.0"
+axum = "0.8"
+schemars = "1"
+
 # 修复 flate2 zlib 后端冲突
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 crc32fast = "1"
@@ -53,3 +59,6 @@ crc32fast = "1"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

@@ -84,6 +84,12 @@ SQLink 是一个轻量、快速、跨平台的数据库客户端，基于 **Taur
 - **转储 SQL 文件**：整库或单表导出 DDL + INSERT（分批 100 行/条）
 - **导出 CSV**：整表导出，不受查询行数上限限制
 
+### MCP 工具
+- 内置只读 MCP Streamable HTTP 服务，复用 SQLink 已保存的四类数据库连接
+- 支持连接/数据库/表发现、表结构读取、单值查询、分页读取和限量只读 SQL
+- 仅监听本机回环地址，使用随机 Bearer Token 鉴权，并限制 SQL 类型、行数、超时与响应体积
+- 连接与工具参数详见 [MCP 工具文档](docs/MCP工具.md)
+
 ### 界面体验
 - **中英双语界面**：右上角一键切换 中文 / English
 - 深色 / 浅色主题一键切换，Windows 系统标题栏随主题联动变色
@@ -121,7 +127,7 @@ SQLink 是一个轻量、快速、跨平台的数据库客户端，基于 **Taur
 ### 环境要求
 
 - [Node.js](https://nodejs.org/) 18+
-- [Rust](https://rustup.rs/) 1.78+
+- [Rust](https://rustup.rs/) 1.85+（内置 MCP SDK 使用 Rust 2024 edition）
 - Tauri 2 系统依赖（Windows 需 [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)，一般系统自带）
 
 ### 开发模式

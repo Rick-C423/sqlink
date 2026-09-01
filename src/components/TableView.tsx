@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { EditContext, QueryResult } from "@/types/database";
+import { ColumnInfo, EditContext, QueryResult } from "@/types/database";
 import { tauriService } from "@/services/tauriService";
 import { quoteIdent, sqlLiteral, commonDataTypes } from "@/lib/utils";
 import { buildAlterStatements, ColumnDraft, DefaultKind, FkDraft, IndexDraft } from "@/lib/ddl";
@@ -71,6 +71,43 @@ export function TableView({ connectionId, database, table, initialSubTab, subTab
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
+
+/**
+ * 构造表数据分页 SQL。
+ *
+ * SQL Server 不使用 2012 才引入的 OFFSET/FETCH，避免旧版本或低兼容级别
+ * 数据库报「OFFSET 附近有语法错误」。ROW_NUMBER 从 SQL Server 2005 起可用。
+ */
+function buildPageSql(
+  driverType: string,
+  table: string,
+  where: string,
+  page: number,
+  pageSize: number,
+  columns: ColumnInfo[]
+): string {
+  const offset = (page - 1) * pageSize;
+  if (driverType !== "sqlserver" && driverType !== "mssql") {
+    return `SELECT * FROM ${table}${where} LIMIT ${pageSize} OFFSET ${offset}`;
+  }
+
+  const rowNumber = quoteIdent("__sqlconnect_row_number", driverType);
+  const pageAlias = quoteIdent("__sqlconnect_page", driverType);
+  const primaryKeys = columns.filter((column) => column.isPrimaryKey);
+  const orderBy = primaryKeys.length > 0
+    ? primaryKeys.map((column) => quoteIdent(column.name, driverType)).join(", ")
+    : "(SELECT 1)";
+  const selectedColumns = columns
+    .map((column) => `${pageAlias}.${quoteIdent(column.name, driverType)}`)
+    .join(", ");
+
+  return `SELECT ${selectedColumns} FROM (` +
+    `SELECT *, ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS ${rowNumber} ` +
+    `FROM ${table}${where}` +
+    `) AS ${pageAlias} ` +
+    `WHERE ${pageAlias}.${rowNumber} BETWEEN ${offset + 1} AND ${offset + pageSize} ` +
+    `ORDER BY ${pageAlias}.${rowNumber}`;
+}
 
 // ---------- 行筛选 ----------
 
@@ -155,16 +192,27 @@ export function TableData({ connectionId, database, table, readonly }: TableView
     const countExpr =
       driverType === "sqlserver" || driverType === "mssql" ? "COUNT_BIG(*)" : "COUNT(*)";
     const countSql = `SELECT ${countExpr} AS cnt FROM ${qt}${where}`;
-    // SQL Server 用 OFFSET/FETCH（需要 ORDER BY）；其余用 LIMIT/OFFSET
-    const dataSql =
-      driverType === "sqlserver" || driverType === "mssql"
-        ? `SELECT * FROM ${qt}${where} ORDER BY (SELECT 1) OFFSET ${(page - 1) * pageSize} ROWS FETCH NEXT ${pageSize} ROWS ONLY`
-        : `SELECT * FROM ${qt}${where} LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
     try {
+      // SQL Server 的兼容分页需要列名和主键；三个读取任务仍尽量并行执行。
+      const columnsPromise = tauriService.getColumns(connectionId, database, table);
+      const dataPromise =
+        driverType === "sqlserver" || driverType === "mssql"
+          ? columnsPromise.then((columns) =>
+              tauriService.executeQuery(
+                connectionId,
+                buildPageSql(driverType, qt, where, page, pageSize, columns),
+                database
+              )
+            )
+          : tauriService.executeQuery(
+              connectionId,
+              buildPageSql(driverType, qt, where, page, pageSize, []),
+              database
+            );
       const [countResult, queryResult, cols] = await Promise.all([
         tauriService.executeQuery(connectionId, countSql, database),
-        tauriService.executeQuery(connectionId, dataSql, database),
-        tauriService.getColumns(connectionId, database, table),
+        dataPromise,
+        columnsPromise,
       ]);
       const total = countResult.rows[0]?.values[0];
       setTotalRows(typeof total === "number" ? total : null);

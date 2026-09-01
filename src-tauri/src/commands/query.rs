@@ -102,6 +102,16 @@ pub async fn schema_get_databases(
 }
 
 #[tauri::command]
+pub async fn schema_get_database_infos(
+    connection_id: String,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<Vec<DatabaseInfo>, String> {
+    let driver = manager.get_connection(&connection_id).await
+        .map_err(|e| e.to_string())?;
+    driver.get_database_infos().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn schema_get_tables(
     connection_id: String,
     database: Option<String>,

@@ -76,20 +76,14 @@ async fn try_connect(
 }
 
 async fn connect_client(config: &ConnectionConfig, database: Option<&str>) -> Result<TdsClient, DatabaseError> {
-    match try_connect(config, database, None).await {
-        Ok(client) => Ok(client),
-        Err(e) => {
-            let msg = e.to_string();
-            // 老版本 SQL Server（2014 及更早，或未打 TLS 1.2 补丁）只支持 TLS 1.0/1.1，
-            // rustls 无法与其握手（报 "tls handshake eof"）。降级为完全不加密重试：
-            // 服务器未强制加密时可用，内网生产库常见。
-            if msg.to_lowercase().contains("tls") {
-                try_connect(config, database, Some(tiberius::EncryptionLevel::NotSupported)).await
-            } else {
-                Err(e)
-            }
-        }
-    }
+    // 与 JDBC encrypt=false 语义一致：关闭时直接声明不支持加密，避免先进行一次
+    // 注定失败或超时的 TLS 握手。需要加密的服务器可在连接配置中显式开启。
+    let encryption = if config.encrypt.unwrap_or(false) {
+        tiberius::EncryptionLevel::Required
+    } else {
+        tiberius::EncryptionLevel::NotSupported
+    };
+    try_connect(config, database, Some(encryption)).await
 }
 
 pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseError> {
@@ -186,15 +180,29 @@ impl DatabaseDriver for MsSqlDriver {
     }
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError> {
-        let result = self.query("SELECT name FROM sys.databases ORDER BY name", None, None).await?;
-        let dbs = result.rows.iter()
-            .filter_map(|row| {
-                row.values.first()
-                    .and_then(|v| v.as_ref())
-                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-            })
+        // MCP 等只读调用只暴露实际可进入的数据库。
+        let dbs = self
+            .get_database_infos()
+            .await?
+            .into_iter()
+            .filter(|database| database.accessible)
+            .map(|database| database.name)
             .collect();
         Ok(dbs)
+    }
+
+    async fn get_database_infos(&self) -> Result<Vec<DatabaseInfo>, DatabaseError> {
+        let mut client = self.client_for(None).await?;
+        let stream = client.simple_query(
+            "SELECT name, CASE WHEN HAS_DBACCESS(name) = 1 THEN 1 ELSE 0 END \
+             FROM sys.databases WHERE state = 0 ORDER BY name",
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+
+        Ok(rows.iter().map(|row| DatabaseInfo {
+            name: row.get::<&str, _>(0).unwrap_or("").to_string(),
+            accessible: row.get::<i32, _>(1).unwrap_or(0) == 1,
+        }).collect())
     }
 
     async fn get_tables(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {

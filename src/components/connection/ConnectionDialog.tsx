@@ -37,6 +37,7 @@ const DEFAULT_CONFIG: ConnectionConfig = {
   user: "root",
   password: "",
   database: "",
+  encrypt: false,
   savePassword: true,
   groupName: "",
   color: "gray",
@@ -258,6 +259,25 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
                 onChange={(e) => updateField("database", e.target.value)}
               />
             </div>
+
+            {config.driverType === "sqlserver" && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="sqlServerEncrypt"
+                    checked={config.encrypt ?? false}
+                    onChange={(e) => updateField("encrypt", e.target.checked)}
+                  />
+                  <Label htmlFor="sqlServerEncrypt" className="cursor-pointer">
+                    {t("connDialog.sqlServerEncrypt")}
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("connDialog.sqlServerEncryptHint")}
+                </p>
+              </div>
+            )}
           </>
         )}
 

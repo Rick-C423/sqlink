@@ -2,6 +2,7 @@ pub mod commands;
 pub mod database;
 pub mod history;
 pub mod logging;
+pub mod mcp;
 pub mod models;
 pub mod store;
 
@@ -31,6 +32,7 @@ pub fn run() {
             commands::query::table_export_csv,
             // Schema
             commands::query::schema_get_databases,
+            commands::query::schema_get_database_infos,
             commands::query::schema_get_tables,
             commands::query::schema_get_columns,
             commands::query::schema_get_indexes,
@@ -71,7 +73,18 @@ pub fn run() {
             }
             // 初始化数据库连接池管理器（含本地持久化存储）
             let config_dir = app.path().app_config_dir().ok();
-            app.manage(database::pool::ConnectionPoolManager::new(config_dir));
+            let manager = database::pool::ConnectionPoolManager::new(config_dir.clone());
+            app.manage(manager.clone());
+
+            // MCP 仅监听本机回环地址，并以随机 Bearer Token 保护。
+            // 启动失败不影响桌面客户端的主流程。
+            if let Some(config_dir) = config_dir {
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = mcp::start(manager, config_dir).await {
+                        tracing::error!(error = %error, "MCP 服务启动失败");
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

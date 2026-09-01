@@ -4,6 +4,7 @@ dist/
 
 # Rust / Tauri
 src-tauri/target/
+src-tauri/target-package/
 
 # 系统与日志
 *.log

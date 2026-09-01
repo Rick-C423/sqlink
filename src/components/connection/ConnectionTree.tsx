@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { ConnectionConfig, TreeNode } from "@/types/database";
+import { ConnectionConfig, DatabaseInfo, TreeNode } from "@/types/database";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { tauriService } from "@/services/tauriService";
@@ -46,6 +46,7 @@ import {
   Zap,
   FileCog,
   Sigma,
+  LockKeyhole,
 } from "lucide-react";
 
 interface ConnectionTreeProps {
@@ -71,6 +72,64 @@ interface MenuState {
 /** 叶子节点类型：无子节点、不显示展开箭头（触发器/存储过程/函数点击直接打开定义） */
 const LEAF_TYPES: TreeNode["type"][] = ["column", "index", "trigger", "procedure", "function"];
 const isLeafType = (type: TreeNode["type"]) => LEAF_TYPES.includes(type);
+
+/** 数据库列表缓存：连接成功先展示缓存，后台再刷新，避免大规模实例阻塞连接。 */
+const DATABASE_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function databaseCacheKey(connectionId: string): string {
+  return `sqlink:database-list:${connectionId}`;
+}
+
+function readDatabaseCache(connectionId: string): DatabaseInfo[] | null {
+  try {
+    const raw = localStorage.getItem(databaseCacheKey(connectionId));
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as { savedAt: number; databases: DatabaseInfo[] };
+    if (Date.now() - cached.savedAt > DATABASE_CACHE_TTL_MS || !Array.isArray(cached.databases)) {
+      return null;
+    }
+    return cached.databases;
+  } catch {
+    return null;
+  }
+}
+
+function writeDatabaseCache(connectionId: string, databases: DatabaseInfo[]): void {
+  try {
+    localStorage.setItem(
+      databaseCacheKey(connectionId),
+      JSON.stringify({ savedAt: Date.now(), databases })
+    );
+  } catch {
+    // 缓存不可用不影响数据库连接和列表加载。
+  }
+}
+
+function buildDatabaseNodes(
+  connectionId: string,
+  driverType: string,
+  databases: DatabaseInfo[],
+  showHidden: boolean
+): TreeNode[] {
+  let visible = databases;
+  if (showHidden) {
+    visible = [...databases].sort(
+      (a, b) =>
+        (a.accessible ? (isSystemDatabase(a.name, driverType) ? 1 : 0) : 2) -
+        (b.accessible ? (isSystemDatabase(b.name, driverType) ? 1 : 0) : 2)
+    );
+  } else {
+    visible = databases.filter(
+      (database) => database.accessible && !isSystemDatabase(database.name, driverType)
+    );
+  }
+  return visible.map((database) => ({
+    id: `${connectionId}::db::${database.name}`,
+    type: "database" as const,
+    name: database.name,
+    metadata: { accessible: database.accessible },
+  }));
+}
 
 /** 按列数据类型选图标（Columns 图标在 16px 下渲染像乱码，改用更直观的类型符号） */
 const columnTypeIcon = (dataType?: string) => {
@@ -130,10 +189,10 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   );
 
   const loadChildren = useCallback(
-    async (node: TreeNode, force = false) => {
+    async (node: TreeNode, force = false, silent = false) => {
       if (!force && (node.children || loadingNodes.has(node.id))) return;
 
-      setNodeLoading(node.id, true);
+      if (!silent) setNodeLoading(node.id, true);
       try {
         let children: TreeNode[] = [];
 
@@ -141,22 +200,25 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           case "connection": {
             const connectionId = node.id;
             const driverType = getDriverType(connectionId);
-            const showSys = useConnectionStore.getState().showSystemDatabases;
-            let dbs = await tauriService.getDatabases(connectionId);
-            if (showSys) {
-              // 显示系统库时排在业务库之后
-              dbs = [...dbs].sort(
-                (a, b) =>
-                  Number(isSystemDatabase(a, driverType)) - Number(isSystemDatabase(b, driverType))
-              );
+            const showHidden = useConnectionStore.getState().showSystemDatabases;
+            const cached = force ? null : readDatabaseCache(connectionId);
+            let databases: DatabaseInfo[];
+            if (cached) {
+              databases = cached;
+              // 缓存立即可见；真实权限状态在后台刷新，不阻塞界面。
+              void tauriService.getDatabaseInfos(connectionId).then((fresh) => {
+                writeDatabaseCache(connectionId, fresh);
+                const currentShowHidden = useConnectionStore.getState().showSystemDatabases;
+                updateNodeChildren(
+                  connectionId,
+                  buildDatabaseNodes(connectionId, driverType, fresh, currentShowHidden)
+                );
+              }).catch(() => undefined);
             } else {
-              dbs = dbs.filter((d) => !isSystemDatabase(d, driverType));
+              databases = await tauriService.getDatabaseInfos(connectionId);
+              writeDatabaseCache(connectionId, databases);
             }
-            children = dbs.map((db) => ({
-              id: `${connectionId}::db::${db}`,
-              type: "database" as const,
-              name: db,
-            }));
+            children = buildDatabaseNodes(connectionId, driverType, databases, showHidden);
             break;
           }
           case "database": {
@@ -302,11 +364,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         }
 
         updateNodeChildren(node.id, children);
-        setNodeLoading(node.id, false);
+        if (!silent) setNodeLoading(node.id, false);
       } catch (err) {
         console.error("Failed to load children:", err);
         setError(t("tree.loadFailed", { error: String(err) }));
-        setNodeLoading(node.id, false);
+        if (!silent) setNodeLoading(node.id, false);
       }
     },
     [loadingNodes, setNodeLoading, updateNodeChildren, getDriverType, t]
@@ -330,7 +392,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         if (n.type === "connection" && n.children) {
           clearNodeChildren(n.id);
           expandNode(n.id);
-          loadChildren({ ...n, children: undefined }, true);
+          loadChildren({ ...n, children: undefined });
         }
         if (n.children) walk(n.children);
       });
@@ -349,7 +411,9 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         markLive(node.id, true);
         setActiveConnection(node.id);
         expandNode(node.id);
-        await loadChildren({ ...node, children: undefined });
+        // 连接状态立即生效；数据库列表使用缓存并在后台刷新，不阻塞连接操作。
+        setNodeLoading(node.id, false);
+        void loadChildren({ ...node, children: undefined }, false, true);
       } catch (err) {
         console.error("Failed to connect:", err);
         setError(t("tree.connectFailed", { error: String(err) }));
@@ -388,6 +452,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
 
   const toggleExpand = useCallback(
     (node: TreeNode) => {
+      if (node.type === "database" && node.metadata?.accessible === false) return;
       if (expandedNodes.has(node.id)) {
         collapseNode(node.id);
       } else {
@@ -401,6 +466,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   );
 
   const handleNodeClick = (node: TreeNode) => {
+    if (node.type === "database" && node.metadata?.accessible === false) return;
     switch (node.type) {
       case "connection":
         if (liveIds.has(node.id)) {
@@ -871,7 +937,9 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         );
       }
       case "database":
-        return <Database className="h-4 w-4 text-blue-500" />;
+        return node.metadata?.accessible === false
+          ? <LockKeyhole className="h-4 w-4 text-gray-400" />
+          : <Database className="h-4 w-4 text-blue-500" />;
       case "table":
         return <Table2 className="h-4 w-4 text-green-600" />;
       case "view":
@@ -911,6 +979,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   };
 
   const renderNode = (node: TreeNode, depth: number = 0) => {
+    const isInaccessible = node.type === "database" && node.metadata?.accessible === false;
     const isExpanded = expandedNodes.has(node.id);
     const isLoading = loadingNodes.has(node.id);
     const isActive =
@@ -919,8 +988,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         node.id === `${activeConnection}::db::${selectedDatabase}`);
     const paddingLeft = depth * 16 + 8;
     const connected = node.type === "connection" && liveIds.has(node.id);
-    const isLeaf = isLeafType(node.type);
-    const hasMenu = ["connection", "database", "table", "view", "trigger", "procedure", "function"].includes(node.type);
+    const isLeaf = isLeafType(node.type) || isInaccessible;
+    const hasMenu = !isInaccessible && ["connection", "database", "table", "view", "trigger", "procedure", "function"].includes(node.type);
     const isSysDb =
       node.type === "database" &&
       isSystemDatabase(node.name, getDriverType(node.id.split("::")[0]));
@@ -929,11 +998,13 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       <div key={node.id}>
         <div
           className={`
-            group flex items-center py-1 px-2 cursor-pointer text-sm select-none
+            group flex items-center py-1 px-2 text-sm select-none
             hover:bg-gray-100 dark:hover:bg-gray-800
             ${isActive ? "tree-node-active" : ""}
+            ${isInaccessible ? "cursor-not-allowed opacity-60" : "cursor-pointer"}
           `}
           style={{ paddingLeft }}
+          title={isInaccessible ? t("tree.noAccess") : undefined}
           onClick={() => handleNodeClick(node)}
           onContextMenu={(e) => {
             if (!hasMenu) return;
@@ -969,6 +1040,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           {isSysDb && (
             <span className="ml-1.5 text-[10px] px-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex-shrink-0">
               {t("tree.system")}
+            </span>
+          )}
+          {isInaccessible && (
+            <span className="ml-1.5 text-[10px] px-1 rounded bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-400 flex-shrink-0">
+              {t("tree.noAccess")}
             </span>
           )}
           {node.metadata?.rowCount !== undefined && node.metadata?.rowCount !== null && (
