@@ -64,7 +64,14 @@ export function DatabaseOverview({ connectionId, database }: DatabaseOverviewPro
           </div>
         )}
         {tables && tables.length > 0 && (
-          <table className="w-full text-sm border-collapse">
+          <table className="w-full text-sm border-collapse table-fixed">
+            <colgroup>
+              {/* 表名占剩余空间；引擎/行数贴内容宽度，避免自动布局把空隙分到中间列 */}
+              <col />
+              <col className="w-28" />
+              <col className="w-28" />
+              <col className="w-[35%]" />
+            </colgroup>
             <thead className="sticky top-0 z-10">
               <tr className="bg-gray-100 dark:bg-gray-800">
                 <th className="px-3 py-1.5 text-left font-semibold text-xs border-b">{t("overview.colName")}</th>
@@ -82,18 +89,18 @@ export function DatabaseOverview({ connectionId, database }: DatabaseOverviewPro
                   title={t("overview.doubleClickOpen")}
                 >
                   <td className="px-3 py-1.5 border-b">
-                    <span className="flex items-center gap-1.5">
-                      <Table2 className="h-3.5 w-3.5 text-green-600" />
-                      {tb.name}
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <Table2 className="h-3.5 w-3.5 text-green-600 flex-shrink-0" />
+                      <span className="truncate">{tb.name}</span>
                     </span>
                   </td>
-                  <td className="px-3 py-1.5 border-b text-muted-foreground">{tb.engine ?? "-"}</td>
+                  <td className="px-3 py-1.5 border-b text-muted-foreground truncate">{tb.engine ?? "-"}</td>
                   <td className="px-3 py-1.5 border-b text-right text-muted-foreground">
                     {tb.rowCount !== undefined && tb.rowCount !== null
                       ? tb.rowCount.toLocaleString()
                       : "-"}
                   </td>
-                  <td className="px-3 py-1.5 border-b text-muted-foreground truncate max-w-[300px]">
+                  <td className="px-3 py-1.5 border-b text-muted-foreground truncate">
                     {tb.comment ?? ""}
                   </td>
                 </tr>

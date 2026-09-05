@@ -60,5 +60,14 @@ crc32fast = "1"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
+# Windows 专用：主题切换后强制标题栏（非客户区）立即重绘
+[target."cfg(windows)".dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+]
+
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
