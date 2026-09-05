@@ -15,3 +15,6 @@ Thumbs.db
 .vscode/
 .idea/
 release-staging/
+
+# ZCode 会话产物
+.zcode/
