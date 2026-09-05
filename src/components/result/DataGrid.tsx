@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { EditContext, QueryResult } from "@/types/database";
 import { cn, quoteIdent, sqlLiteral } from "@/lib/utils";
 import { Button } from "@/components/ui";
@@ -30,6 +31,15 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** 会话内列宽调整（列名 -> 像素），查询列集合变化时重置 */
+  const [colWidths, setColWidths] = useState<Record<string, number>>({});
+  /** 悬停浮层：展示被截断单元格的完整内容 */
+  const [cellTip, setCellTip] = useState<{ text: string; style: React.CSSProperties } | null>(null);
+  const [cellTipCopied, setCellTipCopied] = useState(false);
+  const tipShowTimer = useRef<number | null>(null);
+  const tipHideTimer = useRef<number | null>(null);
+
+  const columnSignature = result?.columns.map((c) => c.name).join("\u0001") ?? "";
 
   // 结果集变化（重新执行）时清空所有未提交改动
   useEffect(() => {
@@ -38,7 +48,22 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     setDeletedRows(new Set());
     setEditingCell(null);
     setSubmitError(null);
+    hideCellTip();
   }, [result]);
+
+  // 列集合变化（切换表/换查询）时重置列宽；重跑相同查询保留已调宽度
+  useEffect(() => {
+    setColWidths({});
+  }, [columnSignature]);
+
+  // 卸载时清理悬停浮层定时器
+  useEffect(
+    () => () => {
+      if (tipShowTimer.current !== null) window.clearTimeout(tipShowTimer.current);
+      if (tipHideTimer.current !== null) window.clearTimeout(tipHideTimer.current);
+    },
+    []
+  );
 
   const editable = !!editContext && !!onApplyEdits;
   const hasPrimaryKey = (editContext?.primaryKeys.length ?? 0) > 0;
@@ -196,6 +221,113 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     });
   };
 
+  /** 拖拽表头右缘调整列宽（会话内有效） */
+  const startColumnResize = (e: React.MouseEvent, columnName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest("th") as HTMLTableCellElement | null;
+    const startX = e.clientX;
+    const startWidth = th?.offsetWidth ?? 200;
+
+    const onMove = (ev: MouseEvent) => {
+      const width = Math.round(startWidth + ev.clientX - startX);
+      setColWidths((prev) => ({ ...prev, [columnName]: Math.min(1000, Math.max(60, width)) }));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const resetColumnWidth = (columnName: string) => {
+    setColWidths((prev) => {
+      if (!(columnName in prev)) return prev;
+      const next = { ...prev };
+      delete next[columnName];
+      return next;
+    });
+  };
+
+  /** 已调宽度的列用内联样式钉住；未调整的列保持内容自适应（最多 300px 截断） */
+  const columnStyle = (columnName: string): React.CSSProperties => {
+    const width = colWidths[columnName];
+    return width ? { width, minWidth: width, maxWidth: width } : {};
+  };
+
+  const hideCellTip = () => {
+    if (tipShowTimer.current !== null) {
+      window.clearTimeout(tipShowTimer.current);
+      tipShowTimer.current = null;
+    }
+    if (tipHideTimer.current !== null) {
+      window.clearTimeout(tipHideTimer.current);
+      tipHideTimer.current = null;
+    }
+    setCellTip(null);
+    setCellTipCopied(false);
+  };
+
+  /** 移出单元格后延迟隐藏，给鼠标移入浮层点"复制"留出时间 */
+  const hideCellTipSoon = () => {
+    if (tipShowTimer.current !== null) {
+      window.clearTimeout(tipShowTimer.current);
+      tipShowTimer.current = null;
+    }
+    if (tipHideTimer.current !== null) window.clearTimeout(tipHideTimer.current);
+    tipHideTimer.current = window.setTimeout(() => {
+      tipHideTimer.current = null;
+      setCellTip(null);
+      setCellTipCopied(false);
+    }, 300);
+  };
+
+  /**
+   * 悬停 500ms 后，若内容确实被截断则显示浮层。
+   * 已显示的浮层不会因为路过其他单元格而立即消失——否则鼠标移向浮层的
+   * 路径会经过下方单元格，浮层在进入前就被清掉，永远点不到复制按钮。
+   */
+  const scheduleCellTip = (el: HTMLTableCellElement, text: string) => {
+    // 在单元格间移动时保持连续性：取消"延迟隐藏"，重新计时显示
+    if (tipHideTimer.current !== null) {
+      window.clearTimeout(tipHideTimer.current);
+      tipHideTimer.current = null;
+    }
+    if (tipShowTimer.current !== null) window.clearTimeout(tipShowTimer.current);
+    tipShowTimer.current = window.setTimeout(() => {
+      tipShowTimer.current = null;
+      // 内容没有溢出、或正在单元格内编辑时不显示，并收起旧浮层
+      if (el.scrollWidth <= el.clientWidth + 1 || el.querySelector("input")) {
+        setCellTip(null);
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const width = Math.min(480, Math.max(200, Math.ceil(rect.width)));
+      const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+      const style: React.CSSProperties =
+        window.innerHeight - rect.bottom >= 96
+          ? { left, top: rect.bottom + 6 }
+          : { left, bottom: window.innerHeight - rect.top + 6 };
+      setCellTip({ text, style });
+    }, 500);
+  };
+
+  const handleCopyCellTip = async () => {
+    if (!cellTip) return;
+    try {
+      await navigator.clipboard.writeText(cellTip.text);
+      setCellTipCopied(true);
+      window.setTimeout(() => setCellTipCopied(false), 1500);
+    } catch (err) {
+      setSubmitError(t("grid.copyFailed", { error: String(err) }));
+    }
+  };
+
   if (!result) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -348,7 +480,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
       )}
 
       {/* 数据表格 */}
-      <div className="flex-1 overflow-auto custom-scrollbar">
+      <div className="flex-1 overflow-auto custom-scrollbar" onScroll={hideCellTip}>
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10">
             <tr className="bg-gray-100 dark:bg-gray-800">
@@ -358,7 +490,8 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
               {result.columns.map((col) => (
                 <th
                   key={col.name}
-                  className="px-3 py-1.5 text-left font-semibold text-xs border-b border-r cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 whitespace-nowrap select-none bg-gray-100 dark:bg-gray-800"
+                  className="relative overflow-hidden px-3 py-1.5 text-left font-semibold text-xs border-b border-r cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 whitespace-nowrap select-none bg-gray-100 dark:bg-gray-800"
+                  style={columnStyle(col.name)}
                   onClick={() => {
                     setSortConfig((prev) =>
                       prev?.key === col.name
@@ -377,6 +510,16 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                     )}
                   </div>
                   <div className="text-[10px] text-gray-400 font-normal">{col.dataType}</div>
+                  <span
+                    title={t("grid.resizeColumn")}
+                    className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize hover:bg-blue-400/60"
+                    onMouseDown={(e) => startColumnResize(e, col.name)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      resetColumnWidth(col.name);
+                    }}
+                  />
                 </th>
               ))}
             </tr>
@@ -422,18 +565,28 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                   {row.values.map((value, colIndex) => {
                     const key = `${origIdx}:${colIndex}`;
                     const original = value === null || value === undefined ? "NULL" : String(value);
+                    const edited = edits[key];
                     return (
                       <td
                         key={colIndex}
                         className={cn(
                           cellBase,
                           canEdit && !isDeleted && "cursor-cell",
-                          edits[key] !== undefined && "bg-amber-50 dark:bg-amber-900/20"
+                          edited !== undefined && "bg-amber-50 dark:bg-amber-900/20"
                         )}
+                        style={columnStyle(result.columns[colIndex]?.name ?? "")}
                         onDoubleClick={() => {
-                          if (canEdit && !isDeleted)
-                            setEditingCell({ key, value: edits[key] ?? original });
+                          if (canEdit && !isDeleted) {
+                            hideCellTip();
+                            setEditingCell({ key, value: edited ?? original });
+                          }
                         }}
+                        onMouseEnter={(e) => {
+                          if (editingCell?.key !== key) {
+                            scheduleCellTip(e.currentTarget, edited ?? original);
+                          }
+                        }}
+                        onMouseLeave={hideCellTipSoon}
                       >
                         {editingCell?.key === key
                           ? renderCellInput(key, original, (v) => commitEdit(key, v, original))
@@ -458,7 +611,17 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                     <td
                       key={colIndex}
                       className={cn(cellBase, "cursor-cell")}
-                      onDoubleClick={() => setEditingCell({ key, value: current })}
+                      style={columnStyle(result.columns[colIndex]?.name ?? "")}
+                      onDoubleClick={() => {
+                        hideCellTip();
+                        setEditingCell({ key, value: current });
+                      }}
+                      onMouseEnter={(e) => {
+                        if (editingCell?.key !== key && current) {
+                          scheduleCellTip(e.currentTarget, current);
+                        }
+                      }}
+                      onMouseLeave={hideCellTipSoon}
                     >
                       {editingCell?.key === key
                         ? renderCellInput(key, current, (v) => commitNewRowCell(newIdx, colIndex, v))
@@ -471,6 +634,38 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
           </tbody>
         </table>
       </div>
+
+      {/* 悬停浮层：显示被截断单元格的完整内容（挂到 body，避免被表格裁剪） */}
+      {cellTip &&
+        createPortal(
+          <div
+            className="fixed z-50 min-w-[180px] max-w-[480px] rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+            style={cellTip.style}
+            onMouseEnter={() => {
+              if (tipHideTimer.current !== null) {
+                window.clearTimeout(tipHideTimer.current);
+                tipHideTimer.current = null;
+              }
+            }}
+            onMouseLeave={hideCellTip}
+          >
+            <button
+              title={t("grid.copyCell")}
+              className="absolute right-1 top-1 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              onClick={handleCopyCellTip}
+            >
+              {cellTipCopied ? (
+                <Check className="h-3 w-3 text-green-600" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+            </button>
+            <div className="custom-scrollbar max-h-[320px] overflow-auto whitespace-pre-wrap break-all px-2.5 py-1.5 pr-8">
+              {cellTip.text}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
