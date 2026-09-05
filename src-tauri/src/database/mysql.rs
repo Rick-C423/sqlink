@@ -3,7 +3,9 @@ use mysql_async::{Opts, OptsBuilder, Pool, prelude::Queryable};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 use crate::database::DatabaseDriver;
 use crate::models::*;
 
@@ -472,41 +474,54 @@ impl DatabaseDriver for MySqlDriver {
     }
 
     async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
-        // SHOW FULL COLUMNS 比 SHOW COLUMNS 多出 Collation/Privileges/Comment 三列
-        let sql = match database {
-            Some(db) => format!(
-                "SHOW FULL COLUMNS FROM `{}` FROM `{}`",
-                self.escape_identifier(table),
-                self.escape_identifier(db)
-            ),
-            None => format!("SHOW FULL COLUMNS FROM `{}`", self.escape_identifier(table)),
+        // 不使用 SHOW FULL COLUMNS：它在部分 MySQL 版本上会等待目标表的元数据锁，
+        // 导致结构页一直转圈。information_schema.COLUMNS 能提供这里需要的全部字段，
+        // 并且明确限定库和表，避免扫描/返回其他对象的元数据。
+        let esc_literal = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
+        let schema = database
+            .map(str::to_owned)
+            .unwrap_or_else(|| "".to_string());
+        let schema_expr = if schema.is_empty() {
+            "DATABASE()".to_string()
+        } else {
+            format!("'{}'", esc_literal(&schema))
         };
-        let result = self.query(&sql, None, None).await?;
+        let sql = format!(
+            "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT \
+             FROM information_schema.COLUMNS \
+             WHERE TABLE_SCHEMA = {} AND TABLE_NAME = '{}' \
+             ORDER BY ORDINAL_POSITION",
+            schema_expr,
+            esc_literal(table)
+        );
+        let result = timeout(Duration::from_secs(15), self.query(&sql, None, None))
+            .await
+            .map_err(|_| DatabaseError::QueryError("读取列信息超时（可能存在未提交的表结构锁）".to_string()))??;
 
         let columns = result.rows.iter()
             .filter_map(|row| {
-                if row.values.len() >= 9 {
+                if row.values.len() >= 7 {
                     let name = row.values.get(0)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str())?;
                     let data_type = row.values.get(1)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str())?;
-                    let nullable = row.values.get(3)
+                    let nullable = row.values.get(2)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str())
                         .map(|s| s == "YES")
                         .unwrap_or(true);
-                    let key = row.values.get(4)
+                    let key = row.values.get(3)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
-                    let default = row.values.get(5)
+                    let default = row.values.get(4)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
-                    let extra = row.values.get(6)
+                    let extra = row.values.get(5)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
-                    let comment = row.values.get(8)
+                    let comment = row.values.get(6)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
 
