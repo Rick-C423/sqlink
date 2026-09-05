@@ -4,6 +4,8 @@
 
 @layer base {
   :root {
+    /* 原生控件（select 弹层/复选框/滚动条）跟随主题配色，否则暗色下弹出白色列表 */
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -29,6 +31,7 @@
 
   /* 深色主题：不同程度的中性灰 */
   .dark {
+    color-scheme: dark;
     --background: 0 0% 10%;
     --foreground: 0 0% 93%;
     --card: 0 0% 13%;
