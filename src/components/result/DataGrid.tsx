@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EditContext, QueryResult } from "@/types/database";
 import { cn, quoteIdent, sqlLiteral } from "@/lib/utils";
@@ -17,6 +17,10 @@ interface EditingCell {
   key: string;
   value: string;
 }
+
+/** 虚拟滚动参数：行高固定（px-1 + leading-5 + border 1px = 29px），只渲染可视区 ± OVERSCAN 行 */
+const ROW_HEIGHT = 29;
+const OVERSCAN = 10;
 
 export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
   const t = useT();
@@ -38,10 +42,14 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
   const [cellTipCopied, setCellTipCopied] = useState(false);
   const tipShowTimer = useRef<number | null>(null);
   const tipHideTimer = useRef<number | null>(null);
+  // 虚拟滚动：滚动位置与可视区高度
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewHeight, setViewHeight] = useState(0);
 
   const columnSignature = result?.columns.map((c) => c.name).join("\u0001") ?? "";
 
-  // 结果集变化（重新执行）时清空所有未提交改动
+  // 结果集变化（重新执行）时清空所有未提交改动，回到顶部
   useEffect(() => {
     setEdits({});
     setNewRows([]);
@@ -49,14 +57,27 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     setEditingCell(null);
     setSubmitError(null);
     hideCellTip();
+    scrollRef.current?.scrollTo({ top: 0 });
+    setScrollTop(0);
   }, [result]);
 
-  // 列集合变化（切换表/换查询）时重置列宽；重跑相同查询保留已调宽度
+  // 跟踪可视区尺寸（窗口/面板拖拽都会变化）
   useEffect(() => {
-    setColWidths({});
-  }, [columnSignature]);
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setViewHeight(el.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  // 卸载时清理悬停浮层定时器
+  // 滚动：直接更新（React 批处理），单帧渲染仅 ~40 行，开销可忽略
+  const handleGridScroll = useCallback(() => {
+    hideCellTip();
+    setScrollTop(scrollRef.current?.scrollTop ?? 0);
+  }, []);
+
   useEffect(
     () => () => {
       if (tipShowTimer.current !== null) window.clearTimeout(tipShowTimer.current);
@@ -64,6 +85,11 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     },
     []
   );
+
+  // 列集合变化（切换表/换查询）时重置列宽；重跑相同查询保留已调宽度
+  useEffect(() => {
+    setColWidths({});
+  }, [columnSignature]);
 
   const editable = !!editContext && !!onApplyEdits;
   const hasPrimaryKey = (editContext?.primaryKeys.length ?? 0) > 0;
@@ -403,7 +429,16 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     />
   );
 
-  const cellBase = "px-3 py-1 border-b border-r whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]";
+  // h-7 + leading-5 把行高钉在 28px（= ROW_HEIGHT），虚拟滚动的占位计算依赖这一点
+  const cellBase =
+    "px-3 py-1 h-7 leading-5 border-b border-r whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]";
+
+  // 虚拟滚动：只渲染可视区附近的行，上下用占位行撑起总高度
+  const totalRows = sortedRows.length;
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+  const endIdx = Math.min(totalRows, Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN);
+  const visibleRows = sortedRows.slice(startIdx, endIdx);
+  const spacerColSpan = result.columns.length + 1;
 
   return (
     <div className="flex flex-col h-full">
@@ -479,8 +514,12 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
         </div>
       )}
 
-      {/* 数据表格 */}
-      <div className="flex-1 overflow-auto custom-scrollbar" onScroll={hideCellTip}>
+      {/* 数据表格；overflow-anchor:none 防止浏览器滚动锚定与占位行变化互相干扰 */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-auto custom-scrollbar [overflow-anchor:none]"
+        onScroll={handleGridScroll}
+      >
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10">
             <tr className="bg-gray-100 dark:bg-gray-800">
@@ -525,7 +564,16 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map(({ row, origIdx }, rowIndex) => {
+            {startIdx > 0 && (
+              <tr aria-hidden>
+                <td
+                  style={{ height: startIdx * ROW_HEIGHT, padding: 0, border: "none" }}
+                  colSpan={spacerColSpan}
+                />
+              </tr>
+            )}
+            {visibleRows.map(({ row, origIdx }, i) => {
+              const rowIndex = startIdx + i;
               const isDeleted = deletedRows.has(origIdx);
               const canEdit = editable && hasPrimaryKey;
               return (
@@ -597,6 +645,15 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                 </tr>
               );
             })}
+
+            {endIdx < totalRows && (
+              <tr aria-hidden>
+                <td
+                  style={{ height: (totalRows - endIdx) * ROW_HEIGHT, padding: 0, border: "none" }}
+                  colSpan={spacerColSpan}
+                />
+              </tr>
+            )}
 
             {/* 新增行 */}
             {newRows.map((newRow, newIdx) => (
