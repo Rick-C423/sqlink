@@ -25,6 +25,7 @@ const enUS: Record<MessageKey, string> = {
   "app.openLogFolder": "Open log folder",
   "app.mcpSettings": "MCP settings",
   "app.settingsMenu": "More settings",
+  "app.loadingEditor": "Loading editor…",
 
   // ---------- Common ----------
   "common.refresh": "Refresh",

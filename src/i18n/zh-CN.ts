@@ -27,6 +27,7 @@ const zhCN = {
   "app.openLogFolder": "打开日志目录",
   "app.mcpSettings": "MCP 设置",
   "app.settingsMenu": "更多设置",
+  "app.loadingEditor": "编辑器加载中…",
 
   // ---------- 通用 ----------
   "common.refresh": "刷新",

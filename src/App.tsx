@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
 import { ConnectionConfig } from "@/types/database";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useEditorStore } from "@/stores/editorStore";
@@ -9,7 +9,10 @@ import { ConnectionTree } from "@/components/connection/ConnectionTree";
 import { DatabaseInfoPanel } from "@/components/connection/DatabaseInfoPanel";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { McpSettingsDialog } from "@/components/mcp/McpSettingsDialog";
-import { SQLEditorPanel } from "@/components/editor/SQLEditor";
+// Monaco 体积大（含各语言 tokenizer），懒加载避免拖慢首屏
+const SQLEditorPanel = lazy(() =>
+  import("@/components/editor/SQLEditor").then((m) => ({ default: m.SQLEditorPanel }))
+);
 import { DataGrid } from "@/components/result/DataGrid";
 import { DatabaseOverview } from "@/components/DatabaseOverview";
 import { TableView } from "@/components/TableView";
@@ -567,6 +570,7 @@ function QueryPanel({
   onCancel: (tabId: string) => void;
   onApplyEdits: (tabId: string, statements: string[]) => Promise<void>;
 }) {
+  const t = useT();
   const tab = useEditorStore((s) => s.tabs.find((t) => t.id === editorTabId));
 
   // 结果区高度（可拖拽，持久化到 localStorage）
@@ -588,13 +592,21 @@ function QueryPanel({
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 min-h-0">
-        <SQLEditorPanel
-          tabId={editorTabId}
-          connectionId={connectionId}
-          onExecute={onExecute}
-          onExecuteAll={onExecuteAll}
-          onCancel={onCancel}
-        />
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+              {t("app.loadingEditor")}
+            </div>
+          }
+        >
+          <SQLEditorPanel
+            tabId={editorTabId}
+            connectionId={connectionId}
+            onExecute={onExecute}
+            onExecuteAll={onExecuteAll}
+            onCancel={onCancel}
+          />
+        </Suspense>
       </div>
       <Resizer
         orientation="horizontal"
