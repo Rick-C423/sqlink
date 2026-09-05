@@ -3,6 +3,7 @@ pub mod database;
 pub mod history;
 pub mod logging;
 pub mod mcp;
+pub mod mcp_settings;
 pub mod models;
 pub mod store;
 
@@ -58,6 +59,10 @@ pub fn run() {
             commands::window::set_window_theme,
             // 日志
             logging::open_log_folder,
+            // MCP 设置
+            commands::mcp::mcp_settings_get,
+            commands::mcp::mcp_settings_save,
+            commands::mcp::mcp_set_connection_allowed,
         ])
         .setup(|app| {
             // 日志初始化要最先做：后续初始化过程的失败才能进日志
@@ -76,11 +81,18 @@ pub fn run() {
             let manager = database::pool::ConnectionPoolManager::new(config_dir.clone());
             app.manage(manager.clone());
 
-            // MCP 仅监听本机回环地址，并以随机 Bearer Token 保护。
-            // 启动失败不影响桌面客户端的主流程。
+            // MCP 仅监听本机回环地址，并以 Bearer Token 保护。
+            // 按设置决定是否启动；启动失败不影响桌面客户端的主流程。
             if let Some(config_dir) = config_dir {
+                let settings_state = mcp_settings::McpSettingsState::load(config_dir.clone());
+                let supervisor = mcp::McpSupervisor::new();
+                app.manage(supervisor.clone());
+                app.manage(settings_state.clone());
                 tauri::async_runtime::spawn(async move {
-                    if let Err(error) = mcp::start(manager, config_dir).await {
+                    let settings = settings_state.get();
+                    if let Err(error) =
+                        supervisor.apply(&settings, &settings_state, &manager).await
+                    {
                         tracing::error!(error = %error, "MCP 服务启动失败");
                     }
                 });

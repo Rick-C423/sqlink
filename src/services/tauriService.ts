@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo } from "@/types/database";
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo, McpSettingsSnapshot, McpSettingsInput } from "@/types/database";
 
 export const tauriService = {
   // 连接管理
@@ -192,5 +192,21 @@ export const tauriService = {
   /** 在系统文件管理器中打开日志目录 */
   async openLogFolder(): Promise<void> {
     await invoke("open_log_folder");
+  },
+
+  // MCP 设置
+  /** 读取 MCP 设置与服务运行状态 */
+  async getMcpSettings(): Promise<McpSettingsSnapshot> {
+    return await invoke("mcp_settings_get");
+  },
+
+  /** 保存 MCP 设置并热应用（停用→停止服务；端口变更→自动重启；工具开关即时生效） */
+  async saveMcpSettings(settings: McpSettingsInput): Promise<McpSettingsSnapshot> {
+    return await invoke("mcp_settings_save", { newSettings: settings });
+  },
+
+  /** 更新已保存连接的 MCP 访问开关（写连接配置，不断开活动连接） */
+  async setConnectionMcpAllowed(connectionId: string, allowed: boolean): Promise<void> {
+    return await invoke("mcp_set_connection_allowed", { connectionId, allowed });
   },
 };

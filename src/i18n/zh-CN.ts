@@ -25,6 +25,8 @@ const zhCN = {
   "app.closeAll": "关闭全部",
   "app.switchLanguage": "Switch to English",
   "app.openLogFolder": "打开日志目录",
+  "app.mcpSettings": "MCP 设置",
+  "app.settingsMenu": "更多设置",
 
   // ---------- 通用 ----------
   "common.refresh": "刷新",
@@ -246,6 +248,8 @@ const zhCN = {
   "grid.deleteRow": "删除该行",
   "grid.newBadge": "新",
   "grid.doubleClickEdit": "双击编辑",
+  "grid.resizeColumn": "拖动调整列宽，双击恢复默认",
+  "grid.copyCell": "复制内容",
 
   // ---------- 数据库概览（DatabaseOverview.tsx） ----------
   "overview.database": "数据库: {name}",
@@ -351,6 +355,27 @@ const zhCN = {
   "dbinfo.size": "数据大小",
   "dbinfo.expand": "展开数据库信息",
   "dbinfo.collapse": "收起数据库信息",
+
+  // ---------- MCP 设置（McpSettingsDialog.tsx） ----------
+  "mcpSettings.title": "MCP 设置",
+  "mcpSettings.runningAt": "服务运行中：{url}",
+  "mcpSettings.stopped": "服务未运行",
+  "mcpSettings.enableService": "启用 MCP 服务（仅本机 127.0.0.1 可访问）",
+  "mcpSettings.port": "端口",
+  "mcpSettings.portHint": "修改端口保存后自动重启服务；环境变量 SQLINK_MCP_PORT 优先于此设置",
+  "mcpSettings.tools": "允许的工具",
+  "mcpSettings.toolListConnections": "列出连接",
+  "mcpSettings.toolListDatabases": "列出数据库",
+  "mcpSettings.toolListTables": "列出数据表",
+  "mcpSettings.toolDescribeTable": "查看表结构",
+  "mcpSettings.toolQueryScalar": "单值查询",
+  "mcpSettings.toolReadTableRows": "读取表数据",
+  "mcpSettings.toolExecuteReadonlySql": "执行只读 SQL",
+  "mcpSettings.connections": "允许 MCP 访问的连接",
+  "mcpSettings.noConnections": "尚未保存任何数据库连接",
+  "mcpSettings.connectionsHint": "取消勾选的连接对 MCP 客户端不可见，访问会返回未授权错误",
+  "mcpSettings.save": "保存并应用",
+  "mcpSettings.saveFailed": "保存失败: {error}",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;

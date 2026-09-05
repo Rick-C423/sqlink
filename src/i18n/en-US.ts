@@ -23,6 +23,8 @@ const enUS: Record<MessageKey, string> = {
   "app.closeAll": "Close All",
   "app.switchLanguage": "切换到中文",
   "app.openLogFolder": "Open log folder",
+  "app.mcpSettings": "MCP settings",
+  "app.settingsMenu": "More settings",
 
   // ---------- Common ----------
   "common.refresh": "Refresh",
@@ -244,6 +246,8 @@ const enUS: Record<MessageKey, string> = {
   "grid.deleteRow": "Delete row",
   "grid.newBadge": "NEW",
   "grid.doubleClickEdit": "Double-click to edit",
+  "grid.resizeColumn": "Drag to resize column, double-click to reset",
+  "grid.copyCell": "Copy value",
 
   // ---------- Database overview (DatabaseOverview.tsx) ----------
   "overview.database": "Database: {name}",
@@ -349,6 +353,29 @@ const enUS: Record<MessageKey, string> = {
   "dbinfo.size": "Size",
   "dbinfo.expand": "Show database info",
   "dbinfo.collapse": "Hide database info",
+
+  // ---------- MCP settings (McpSettingsDialog.tsx) ----------
+  "mcpSettings.title": "MCP Settings",
+  "mcpSettings.runningAt": "Service running: {url}",
+  "mcpSettings.stopped": "Service not running",
+  "mcpSettings.enableService": "Enable MCP service (localhost 127.0.0.1 only)",
+  "mcpSettings.port": "Port",
+  "mcpSettings.portHint":
+    "Saving a changed port restarts the service automatically; the SQLINK_MCP_PORT env var overrides this setting",
+  "mcpSettings.tools": "Enabled tools",
+  "mcpSettings.toolListConnections": "List connections",
+  "mcpSettings.toolListDatabases": "List databases",
+  "mcpSettings.toolListTables": "List tables",
+  "mcpSettings.toolDescribeTable": "Describe table",
+  "mcpSettings.toolQueryScalar": "Scalar query",
+  "mcpSettings.toolReadTableRows": "Read table rows",
+  "mcpSettings.toolExecuteReadonlySql": "Execute read-only SQL",
+  "mcpSettings.connections": "Connections accessible via MCP",
+  "mcpSettings.noConnections": "No saved database connections yet",
+  "mcpSettings.connectionsHint":
+    "Unchecked connections are invisible to MCP clients; access attempts return an authorization error",
+  "mcpSettings.save": "Save & apply",
+  "mcpSettings.saveFailed": "Save failed: {error}",
 };
 
 export default enUS;

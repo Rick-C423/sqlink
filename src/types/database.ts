@@ -12,6 +12,8 @@ export interface ConnectionConfig {
   savePassword?: boolean;
   groupName?: string;
   color?: string;
+  /** 是否允许内置 MCP 服务访问该连接；缺省视为允许（历史行为）。 */
+  mcpAllowed?: boolean;
 }
 
 export interface ColumnMetadata {
@@ -36,6 +38,24 @@ export interface QueryResult {
   rowsAffected?: number;
   truncated?: boolean;
   error?: string;
+}
+
+/** MCP 设置 + 运行状态快照（mcp_settings_get / mcp_settings_save 返回） */
+export interface McpSettingsSnapshot {
+  enabled: boolean;
+  port: number;
+  disabledTools: string[];
+  running: boolean;
+  url?: string | null;
+  /** 后端支持的全部工具名 */
+  tools: string[];
+}
+
+/** MCP 设置的可编辑部分（mcp_settings_save 入参） */
+export interface McpSettingsInput {
+  enabled: boolean;
+  port: number;
+  disabledTools: string[];
 }
 
 export interface TableInfo {

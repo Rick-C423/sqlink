@@ -134,6 +134,11 @@ impl ConnectionPoolManager {
         self.require_store()?.list()
     }
 
+    /// 更新已保存连接的 MCP 访问开关（仅改 connections.json，不断开活动连接）
+    pub fn set_connection_mcp_allowed(&self, id: &str, allowed: bool) -> Result<(), DatabaseError> {
+        self.require_store()?.set_mcp_allowed(id, allowed)
+    }
+
     /// 用已保存的配置建立活动连接（密码在后端解密，不下发前端）
     pub async fn connect_saved(&self, id: &str) -> Result<String, DatabaseError> {
         let config = self

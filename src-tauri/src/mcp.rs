@@ -2,7 +2,7 @@
 //!
 //! 服务只监听 127.0.0.1，使用每次启动随机生成的 Bearer Token，且仅暴露只读工具。
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::{Arc, Mutex}, time::Duration};
 
 use axum::{
     extract::{Request, State},
@@ -24,9 +24,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use crate::{database::pool::ConnectionPoolManager, models::QueryResult};
+use crate::{
+    database::pool::ConnectionPoolManager,
+    mcp_settings::{McpSettings, McpSettingsState},
+    models::QueryResult,
+};
 
-const DEFAULT_PORT: u16 = 48123;
+/// 全部 MCP 工具名；设置界面的工具开关以此为准。
+pub const MCP_TOOLS: [&str; 7] = [
+    "list_connections",
+    "list_databases",
+    "list_tables",
+    "describe_table",
+    "query_scalar",
+    "read_table_rows",
+    "execute_readonly_sql",
+];
+
 const DEFAULT_LIMIT: usize = 100;
 const MAX_LIMIT: usize = 1_000;
 const MAX_RESPONSE_BYTES: usize = 1_000_000;
@@ -90,11 +104,35 @@ struct SqlinkMcp {
 }
 
 impl SqlinkMcp {
-    fn new(manager: ConnectionPoolManager) -> Self {
+    fn new(manager: ConnectionPoolManager, settings: Arc<McpSettings>) -> Self {
+        let mut tool_router = Self::tool_router();
+        // 每请求新建实例（stateless 模式），因此工具开关的变更即时生效，无需重启服务
+        for name in &settings.disabled_tools {
+            tool_router.disable_route(name.clone());
+        }
         Self {
             manager,
-            tool_router: Self::tool_router(),
+            tool_router,
         }
+    }
+
+    /// 连接白名单：仅已保存且未被关闭 MCP 访问的连接可用（mcpAllowed 缺省视为允许）。
+    fn connection_allowed(&self, connection_id: &str) -> Result<(), String> {
+        let saved = self.manager.list_saved().map_err(|e| e.to_string())?;
+        match saved.iter().find(|c| c.id.as_deref() == Some(connection_id)) {
+            Some(config) if config.mcp_allowed != Some(false) => Ok(()),
+            Some(_) => Err("该连接未允许 MCP 访问：请在 SQLink 的 MCP 设置中开启".into()),
+            None => Err("连接不存在或未在 SQLink 中保存".into()),
+        }
+    }
+
+    /// 已保存连接中允许 MCP 访问的部分
+    fn allowed_connections(&self) -> Result<Vec<crate::models::ConnectionConfig>, String> {
+        let saved = self.manager.list_saved().map_err(|e| e.to_string())?;
+        Ok(saved
+            .into_iter()
+            .filter(|c| c.mcp_allowed != Some(false))
+            .collect())
     }
 
     async fn query(
@@ -122,7 +160,7 @@ impl SqlinkMcp {
 impl SqlinkMcp {
     #[tool(description = "列出 SQLink 中已保存的数据库连接；不返回密码")]
     async fn list_connections(&self) -> Result<String, String> {
-        let connections = self.manager.list_saved().map_err(|e| e.to_string())?;
+        let connections = self.allowed_connections()?;
         json_text(&connections)
     }
 
@@ -131,6 +169,7 @@ impl SqlinkMcp {
         &self,
         Parameters(req): Parameters<ConnectionRequest>,
     ) -> Result<String, String> {
+        self.connection_allowed(&req.connection_id)?;
         let driver = self
             .manager
             .get_connection(&req.connection_id)
@@ -145,6 +184,7 @@ impl SqlinkMcp {
         &self,
         Parameters(req): Parameters<DatabaseRequest>,
     ) -> Result<String, String> {
+        self.connection_allowed(&req.connection_id)?;
         let driver = self
             .manager
             .get_connection(&req.connection_id)
@@ -162,6 +202,7 @@ impl SqlinkMcp {
         &self,
         Parameters(req): Parameters<TableRequest>,
     ) -> Result<String, String> {
+        self.connection_allowed(&req.connection_id)?;
         let driver = self
             .manager
             .get_connection(&req.connection_id)
@@ -181,6 +222,7 @@ impl SqlinkMcp {
         &self,
         Parameters(req): Parameters<ScalarRequest>,
     ) -> Result<String, String> {
+        self.connection_allowed(&req.connection_id)?;
         validate_readonly_sql(&req.sql)?;
         let result = self
             .query(&req.connection_id, req.database.as_deref(), &req.sql)
@@ -204,6 +246,7 @@ impl SqlinkMcp {
         &self,
         Parameters(req): Parameters<ReadRowsRequest>,
     ) -> Result<String, String> {
+        self.connection_allowed(&req.connection_id)?;
         let driver = self
             .manager
             .get_connection(&req.connection_id)
@@ -242,6 +285,7 @@ impl SqlinkMcp {
         &self,
         Parameters(req): Parameters<ReadonlySqlRequest>,
     ) -> Result<String, String> {
+        self.connection_allowed(&req.connection_id)?;
         validate_readonly_sql(&req.sql)?;
         let limit = checked_limit(req.limit)?;
         let mut result = self
@@ -290,50 +334,148 @@ struct McpClientConfig<'a> {
     authorization: String,
 }
 
-pub async fn start(manager: ConnectionPoolManager, config_dir: PathBuf) -> Result<(), String> {
-    let port = std::env::var("SQLINK_MCP_PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_PORT);
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(address)
-        .await
-        .map_err(|e| format!("无法监听 {address}: {e}"))?;
+/// MCP 服务的运行状态（给设置界面的状态展示）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRunStatus {
+    pub running: bool,
+    pub url: Option<String>,
+    pub port: Option<u16>,
+}
 
-    let config_path = config_dir.join("mcp-server.json");
-    let token = load_or_create_token(&config_path);
-    let endpoint = format!("http://{address}/mcp");
-    let config = McpClientConfig {
-        transport: "streamable-http",
-        url: endpoint.clone(),
-        authorization: format!("Bearer {token}"),
-    };
-    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
-    std::fs::write(
-        &config_path,
-        serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("写入 MCP 配置失败: {e}"))?;
+struct RunningService {
+    handle: tauri::async_runtime::JoinHandle<()>,
+    token: CancellationToken,
+    port: u16,
+}
 
-    let cancellation = CancellationToken::new();
-    let service: StreamableHttpService<SqlinkMcp, LocalSessionManager> = StreamableHttpService::new(
-        move || Ok(SqlinkMcp::new(manager.clone())),
-        Default::default(),
-        StreamableHttpServerConfig::default()
-            .with_stateful_mode(false)
-            .with_json_response(true)
-            .with_sse_keep_alive(None)
-            .with_cancellation_token(cancellation.child_token()),
-    );
-    let app = Router::new()
-        .nest_service("/mcp", service)
-        .layer(middleware::from_fn_with_state(
-            AuthToken(token.into()),
-            authorize,
-        ));
+/// MCP 服务生命周期管理（Tauri managed state）：
+/// 按设置启动/停止/重启服务；端口占用等启动错误会返回给设置界面。
+#[derive(Clone, Default)]
+pub struct McpSupervisor {
+    inner: Arc<Mutex<Option<RunningService>>>,
+}
 
-    tracing::info!(url = %endpoint, config = %config_dir.join("mcp-server.json").display(), "MCP 服务已启动");
-    axum::serve(listener, app).await.map_err(|e| e.to_string())
+impl McpSupervisor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 当前运行状态；不在运行时 running=false。
+    pub fn status(&self) -> McpRunStatus {
+        let guard = self.inner.lock().expect("MCP 状态锁不会中毒");
+        match guard.as_ref() {
+            Some(running) => McpRunStatus {
+                running: true,
+                url: Some(format!("http://127.0.0.1:{}/mcp", running.port)),
+                port: Some(running.port),
+            },
+            None => McpRunStatus {
+                running: false,
+                url: None,
+                port: None,
+            },
+        }
+    }
+
+    /// 优雅停止当前服务并等待端口释放。
+    pub async fn stop(&self) {
+        let running = self.inner.lock().expect("MCP 状态锁不会中毒").take();
+        if let Some(running) = running {
+            running.token.cancel();
+            let _ = running.handle.await;
+            tracing::info!("MCP 服务已停止");
+        }
+    }
+
+    /// 按设置把服务调整到目标状态：停用 → 停止；启用 → 旧实例停止后在新端口启动。
+    /// 绑定失败时返回错误，此时服务处于停止状态，可修正设置后重试。
+    pub async fn apply(
+        &self,
+        settings: &McpSettings,
+        settings_state: &McpSettingsState,
+        manager: &ConnectionPoolManager,
+    ) -> Result<McpRunStatus, String> {
+        self.stop().await;
+        if !settings.enabled {
+            return Ok(self.status());
+        }
+        self.start_service(settings, settings_state, manager).await?;
+        Ok(self.status())
+    }
+
+    async fn start_service(
+        &self,
+        settings: &McpSettings,
+        settings_state: &McpSettingsState,
+        manager: &ConnectionPoolManager,
+    ) -> Result<(), String> {
+        // 环境变量显式指定端口时优先于设置文件（与历史行为一致）
+        let port = std::env::var("SQLINK_MCP_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(settings.port);
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = tokio::net::TcpListener::bind(address)
+            .await
+            .map_err(|e| format!("无法监听 {address}: {e}"))?;
+
+        let config_dir = settings_state.config_dir().to_path_buf();
+        let config_path = config_dir.join("mcp-server.json");
+        let token_value = load_or_create_token(&config_path);
+        let endpoint = format!("http://{address}/mcp");
+        let config = McpClientConfig {
+            transport: "streamable-http",
+            url: endpoint.clone(),
+            authorization: format!("Bearer {token_value}"),
+        };
+        std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+        std::fs::write(
+            &config_path,
+            serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("写入 MCP 配置失败: {e}"))?;
+
+        let cancellation = CancellationToken::new();
+        let service: StreamableHttpService<SqlinkMcp, LocalSessionManager> =
+            StreamableHttpService::new(
+                {
+                    let manager = manager.clone();
+                    let settings_state = settings_state.clone();
+                    move || Ok(SqlinkMcp::new(manager.clone(), settings_state.get()))
+                },
+                Default::default(),
+                StreamableHttpServerConfig::default()
+                    .with_stateful_mode(false)
+                    .with_json_response(true)
+                    .with_sse_keep_alive(None)
+                    .with_cancellation_token(cancellation.child_token()),
+            );
+        let app = Router::new()
+            .nest_service("/mcp", service)
+            .layer(middleware::from_fn_with_state(
+                AuthToken(token_value.into()),
+                authorize,
+            ));
+
+        let serve_token = cancellation.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            if let Err(error) = axum::serve(listener, app)
+                .with_graceful_shutdown(serve_token.cancelled_owned())
+                .await
+            {
+                tracing::error!(error = %error, "MCP 服务异常退出");
+            }
+        });
+        *self.inner.lock().expect("MCP 状态锁不会中毒") = Some(RunningService {
+            handle,
+            token: cancellation,
+            port,
+        });
+
+        tracing::info!(url = %endpoint, config = %config_dir.join("mcp-server.json").display(), "MCP 服务已启动");
+        Ok(())
+    }
 }
 
 fn checked_limit(limit: Option<usize>) -> Result<usize, String> {
@@ -510,8 +652,21 @@ fn strip_literals_and_comments(sql: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::ConnectionConfig;
+    use crate::store::ConnectionStore;
 
     const INIT_BODY: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sqlink-test","version":"1.0"}}}"#;
+
+    fn accept_headers() -> reqwest::header::HeaderMap {
+        use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers
+    }
 
     #[test]
     fn readonly_sql_allows_select_and_ignores_literals() {
@@ -536,13 +691,59 @@ mod tests {
         assert!(checked_limit(Some(MAX_LIMIT + 1)).is_err());
     }
 
+    #[test]
+    fn whitelist_filters_denied_and_unsaved_connections() {
+        let dir = std::env::temp_dir().join(format!(
+            "sqlink-mcp-whitelist-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let config = |id: &str, allowed: Option<bool>| ConnectionConfig {
+            id: Some(id.into()),
+            name: id.into(),
+            driver_type: "sqlite".into(),
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            password: String::new(),
+            database: Some(dir.join("t.db").to_string_lossy().into_owned()),
+            encrypt: None,
+            save_password: None,
+            group_name: None,
+            color: None,
+            mcp_allowed: allowed,
+        };
+        store.save(&config("allow-default", None)).unwrap();
+        store.save(&config("allow-true", Some(true))).unwrap();
+        store.save(&config("deny", Some(false))).unwrap();
+
+        let manager = ConnectionPoolManager::new(Some(dir.clone()));
+        let mcp = SqlinkMcp::new(manager, Arc::new(McpSettings::default()));
+
+        let list = mcp.allowed_connections().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().all(|c| c.id.as_deref() != Some("deny")));
+
+        assert!(mcp.connection_allowed("allow-default").is_ok());
+        assert!(mcp.connection_allowed("allow-true").is_ok());
+        assert!(mcp.connection_allowed("deny").unwrap_err().contains("未允许"));
+        assert!(mcp.connection_allowed("missing").is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[tokio::test]
     async fn mcp_http_requires_auth_and_exposes_tools() {
         let manager = ConnectionPoolManager::new(None);
         let cancellation = CancellationToken::new();
         let service: StreamableHttpService<SqlinkMcp, LocalSessionManager> =
             StreamableHttpService::new(
-                move || Ok(SqlinkMcp::new(manager.clone())),
+                move || {
+                    Ok(SqlinkMcp::new(
+                        manager.clone(),
+                        Arc::new(McpSettings::default()),
+                    ))
+                },
                 Default::default(),
                 StreamableHttpServerConfig::default()
                     .with_stateful_mode(false)
@@ -571,8 +772,7 @@ mod tests {
         let initialized: Value = client
             .post(&url)
             .header("Authorization", "Bearer test-token")
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
+            .headers(accept_headers())
             .body(INIT_BODY)
             .send()
             .await
@@ -585,8 +785,7 @@ mod tests {
         let tools: Value = client
             .post(&url)
             .header("Authorization", "Bearer test-token")
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
+            .headers(accept_headers())
             .json(&json!({"jsonrpc":"2.0", "id":2, "method":"tools/list", "params":{}}))
             .send()
             .await
@@ -604,5 +803,82 @@ mod tests {
         assert!(names.contains(&"describe_table"));
         assert!(names.contains(&"read_table_rows"));
         assert!(names.contains(&"execute_readonly_sql"));
+    }
+
+    #[tokio::test]
+    async fn mcp_disabled_tools_hidden_and_rejected() {
+        let manager = ConnectionPoolManager::new(None);
+        let settings = Arc::new(McpSettings {
+            enabled: true,
+            port: 0,
+            disabled_tools: vec!["execute_readonly_sql".into(), "read_table_rows".into()],
+        });
+        let cancellation = CancellationToken::new();
+        let service: StreamableHttpService<SqlinkMcp, LocalSessionManager> =
+            StreamableHttpService::new(
+                move || Ok(SqlinkMcp::new(manager.clone(), settings.clone())),
+                Default::default(),
+                StreamableHttpServerConfig::default()
+                    .with_stateful_mode(false)
+                    .with_json_response(true)
+                    .with_sse_keep_alive(None)
+                    .with_cancellation_token(cancellation.child_token()),
+            );
+        let app =
+            Router::new()
+                .nest_service("/mcp", service)
+                .layer(middleware::from_fn_with_state(
+                    AuthToken("test-token".into()),
+                    authorize,
+                ));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}/mcp");
+        let headers = accept_headers();
+        let auth = reqwest::header::HeaderValue::from_static("Bearer test-token");
+
+        let tools: Value = client
+            .post(&url)
+            .header("Authorization", auth.clone())
+            .headers(headers.clone())
+            .json(&json!({"jsonrpc":"2.0", "id":2, "method":"tools/list", "params":{}}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let names = tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect::<Vec<_>>();
+        assert!(!names.contains(&"execute_readonly_sql"));
+        assert!(!names.contains(&"read_table_rows"));
+        assert!(names.contains(&"list_connections"));
+        assert!(names.contains(&"describe_table"));
+
+        // 被禁用的工具调用直接报错
+        let call: Value = client
+            .post(&url)
+            .header("Authorization", auth)
+            .headers(headers)
+            .json(&json!({
+                "jsonrpc":"2.0", "id":3, "method":"tools/call",
+                "params":{"name":"execute_readonly_sql","arguments":{"sql":"SELECT 1"}}
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(call.get("error").is_some(), "disabled tool call should error: {call}");
     }
 }

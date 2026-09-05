@@ -146,4 +146,15 @@ impl ConnectionStore {
         all.retain(|c| c.id.as_deref() != Some(id));
         self.write_all(&all)
     }
+
+    /// 仅更新连接的 MCP 访问开关：保留密文密码原样，不触碰活动连接。
+    pub fn set_mcp_allowed(&self, id: &str, allowed: bool) -> Result<(), DatabaseError> {
+        let mut all = self.read_all()?;
+        let target = all
+            .iter_mut()
+            .find(|c| c.id.as_deref() == Some(id))
+            .ok_or_else(|| DatabaseError::Unknown("连接不存在".into()))?;
+        target.mcp_allowed = Some(allowed);
+        self.write_all(&all)
+    }
 }

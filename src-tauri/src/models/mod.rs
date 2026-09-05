@@ -16,6 +16,8 @@ pub struct ConnectionConfig {
     pub save_password: Option<bool>,
     pub group_name: Option<String>,
     pub color: Option<String>,
+    /// 是否允许内置 MCP 服务访问该连接；旧配置缺省视为允许，保持历史行为。
+    pub mcp_allowed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

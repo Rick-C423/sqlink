@@ -8,6 +8,7 @@ import { extractSingleTable, cn } from "@/lib/utils";
 import { ConnectionTree } from "@/components/connection/ConnectionTree";
 import { DatabaseInfoPanel } from "@/components/connection/DatabaseInfoPanel";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
+import { McpSettingsDialog } from "@/components/mcp/McpSettingsDialog";
 import { SQLEditorPanel } from "@/components/editor/SQLEditor";
 import { DataGrid } from "@/components/result/DataGrid";
 import { DatabaseOverview } from "@/components/DatabaseOverview";
@@ -17,7 +18,7 @@ import { RoutineView } from "@/components/RoutineView";
 import { UsersView } from "@/components/UsersView";
 import { ServerOverview } from "@/components/ServerOverview";
 import { CreateTableView } from "@/components/CreateTableView";
-import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages, ShieldCheck, Server, ScrollText, Zap, FileCog, Sigma } from "lucide-react";
+import { Menu, X, Database, Table2, FolderOpen, FileCode2, Plus, Sun, Moon, ChevronLeft, ChevronRight, Eye, Languages, ShieldCheck, Server, ScrollText, Zap, FileCog, Sigma, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { ContextMenu } from "@/components/ContextMenu";
 import { Resizer } from "@/components/ui/Resizer";
@@ -28,6 +29,7 @@ export default function App() {
   const t = useT();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<ConnectionConfig | null>(null);
+  const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // tab 条右键菜单
@@ -71,6 +73,8 @@ export default function App() {
 
   const locale = useI18nStore((s) => s.locale);
   const toggleLocale = useI18nStore((s) => s.toggleLocale);
+  // 顶栏设置菜单（MCP 设置 / 日志目录 / 语言切换）
+  const [topMenu, setTopMenu] = useState<{ x: number; y: number } | null>(null);
 
   // 启动时加载已保存的连接
   useEffect(() => {
@@ -380,20 +384,13 @@ export default function App() {
               variant="ghost"
               size="icon"
               className="h-7 w-7 flex-shrink-0"
-              title={t("app.openLogFolder")}
-              onClick={() => tauriService.openLogFolder().catch((e) => setError(String(e)))}
+              title={t("app.settingsMenu")}
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setTopMenu({ x: rect.left, y: rect.bottom + 4 });
+              }}
             >
-              <ScrollText className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 flex-shrink-0 text-xs"
-              title={t("app.switchLanguage")}
-              onClick={toggleLocale}
-            >
-              <Languages className="h-4 w-4 mr-1" />
-              {locale === "zh-CN" ? "EN" : "中"}
+              <Settings2 className="h-4 w-4" />
             </Button>
             {activeConnection && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground px-3 flex-shrink-0">
@@ -515,12 +512,41 @@ export default function App() {
         />
       )}
 
+      {/* 顶栏设置菜单 */}
+      {topMenu && (
+        <ContextMenu
+          x={topMenu.x}
+          y={topMenu.y}
+          items={[
+            {
+              label: t("app.mcpSettings"),
+              icon: <Settings2 className="h-4 w-4" />,
+              onClick: () => setMcpSettingsOpen(true),
+            },
+            {
+              label: t("app.openLogFolder"),
+              icon: <ScrollText className="h-4 w-4" />,
+              onClick: () => tauriService.openLogFolder().catch((err) => setError(String(err))),
+            },
+            {
+              label: locale === "zh-CN" ? "English" : "中文",
+              icon: <Languages className="h-4 w-4" />,
+              onClick: toggleLocale,
+            },
+          ]}
+          onClose={() => setTopMenu(null)}
+        />
+      )}
+
       {/* 连接对话框 */}
       <ConnectionDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         editing={editingConnection}
       />
+
+      {/* MCP 设置对话框 */}
+      <McpSettingsDialog open={mcpSettingsOpen} onClose={() => setMcpSettingsOpen(false)} />
     </div>
   );
 }
