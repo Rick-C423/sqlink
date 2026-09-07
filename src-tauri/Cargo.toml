@@ -34,6 +34,9 @@ tracing-appender = "0.2"
 aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.8"
+# 加密密钥存系统钥匙串（Windows 凭据管理器 / macOS 钥匙串 / Linux Secret Service）
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+sha2 = "0.10"
 
 # 数据库驱动
 mysql_async = { version = "0.34", default-features = false, features = ["rustls-tls"] }
