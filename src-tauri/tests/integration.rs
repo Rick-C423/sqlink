@@ -75,7 +75,8 @@ fn parse_conn(driver: &str, url: &str) -> ConnectionConfig {
 fn dialect(driver: &str) -> (&'static str, &'static str, &'static str) {
     match driver {
         "mysql" => (
-            "CREATE TABLE sqlink_it (id INT PRIMARY KEY, name VARCHAR(200), note TEXT)",
+            "CREATE TABLE sqlink_it (id INT PRIMARY KEY, name VARCHAR(200), note TEXT, \
+             def_col VARCHAR(100) NOT NULL DEFAULT 'dk' COMMENT '默认值回归')",
             "DROP TABLE IF EXISTS sqlink_it",
             "LIMIT 1 OFFSET 0",
         ),
@@ -165,6 +166,24 @@ async fn exercise(driver: Arc<dyn DatabaseDriver>) {
         columns.iter().any(|c| c.name == "name"),
         "get_columns 缺少 name 列"
     );
+
+    // information_schema 元数据路径的回归：默认值与注释必须原样返回，不得丢失或变形
+    if kind == "mysql" {
+        let def_col = columns
+            .iter()
+            .find(|c| c.name == "def_col")
+            .expect("get_columns 缺少 def_col");
+        assert_eq!(
+            def_col.default_value.as_deref(),
+            Some("dk"),
+            "列默认值应原样来自 information_schema"
+        );
+        assert_eq!(
+            def_col.comment.as_deref(),
+            Some("默认值回归"),
+            "列注释应原样来自 information_schema"
+        );
+    }
 
     // 4) 事务批处理：两条 INSERT 成功提交
     let inserted = driver
