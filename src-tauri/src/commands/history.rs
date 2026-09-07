@@ -1,6 +1,6 @@
-use tauri::State;
 use crate::database::pool::ConnectionPoolManager;
 use crate::models::*;
+use tauri::State;
 
 /// 查询历史：按连接列出（最新在前）
 #[tauri::command]
@@ -27,5 +27,7 @@ pub async fn history_clear(
     connection_id: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<(), String> {
-    manager.clear_history(&connection_id).map_err(|e| e.to_string())
+    manager
+        .clear_history(&connection_id)
+        .map_err(|e| e.to_string())
 }

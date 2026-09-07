@@ -4,11 +4,11 @@
 //! 密钥存于同目录 key.bin（首次运行随机生成）。
 //! 注意：密钥与数据同机存放，只能防"随手拷贝"，不防针对性攻击；后续可迁移到系统钥匙串。
 
-use std::path::PathBuf;
-use aes_gcm::{Aes256Gcm, Nonce};
-use aes_gcm::aead::{Aead, KeyInit};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use crate::models::{ConnectionConfig, DatabaseError};
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use std::path::PathBuf;
 
 const ENC_PREFIX: &str = "enc:v1:";
 
@@ -59,24 +59,31 @@ impl ConnectionStore {
         let ciphertext = cipher
             .encrypt(Nonce::from_slice(&nonce_bytes), plain.as_bytes())
             .map_err(|e| DatabaseError::Unknown(format!("密码加密失败: {}", e)))?;
-        Ok(format!("{}{}:{}", ENC_PREFIX, B64.encode(nonce_bytes), B64.encode(ciphertext)))
+        Ok(format!(
+            "{}{}:{}",
+            ENC_PREFIX,
+            B64.encode(nonce_bytes),
+            B64.encode(ciphertext)
+        ))
     }
 
     fn decrypt_password(&self, stored: &str) -> Result<String, DatabaseError> {
         if let Some(rest) = stored.strip_prefix(ENC_PREFIX) {
-            let (nonce_b64, cipher_b64) = rest.split_once(':')
+            let (nonce_b64, cipher_b64) = rest
+                .split_once(':')
                 .ok_or_else(|| DatabaseError::Unknown("密码密文格式错误".into()))?;
-            let nonce_bytes = B64.decode(nonce_b64)
+            let nonce_bytes = B64
+                .decode(nonce_b64)
                 .map_err(|e| DatabaseError::Unknown(e.to_string()))?;
-            let ciphertext = B64.decode(cipher_b64)
+            let ciphertext = B64
+                .decode(cipher_b64)
                 .map_err(|e| DatabaseError::Unknown(e.to_string()))?;
             let cipher = Aes256Gcm::new_from_slice(&self.key)
                 .map_err(|e| DatabaseError::Unknown(e.to_string()))?;
             let plain = cipher
                 .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
                 .map_err(|_| DatabaseError::Unknown("密码解密失败（密钥可能已更换）".into()))?;
-            String::from_utf8(plain)
-                .map_err(|e| DatabaseError::Unknown(e.to_string()))
+            String::from_utf8(plain).map_err(|e| DatabaseError::Unknown(e.to_string()))
         } else {
             // 未加密（旧数据或空密码）
             Ok(stored.to_string())

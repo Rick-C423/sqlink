@@ -1,13 +1,13 @@
-pub mod pool;
+pub mod dump;
+pub mod mssql;
 pub mod mysql;
+pub mod pool;
 pub mod postgres;
 pub mod sqlite;
-pub mod mssql;
-pub mod dump;
 
+use crate::models::*;
 use async_trait::async_trait;
 use std::sync::Arc;
-use crate::models::*;
 
 /// 数据库驱动 trait —— 所有方法都只需要 &self（内部可变性）
 #[async_trait]
@@ -16,8 +16,18 @@ pub trait DatabaseDriver: Send + Sync {
     fn is_connected(&self) -> bool;
 
     /// query_id 用于查询取消（KILL QUERY）；database 为查询上下文库（执行前 USE）
-    async fn query(&self, sql: &str, database: Option<&str>, query_id: Option<u64>) -> Result<QueryResult, DatabaseError>;
-    async fn execute(&self, sql: &str, database: Option<&str>, query_id: Option<u64>) -> Result<QueryResult, DatabaseError>;
+    async fn query(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError>;
+    async fn execute(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError>;
     async fn cancel_query(&self, query_id: u64) -> Result<(), DatabaseError>;
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError>;
@@ -27,42 +37,92 @@ pub trait DatabaseDriver: Send + Sync {
             .get_databases()
             .await?
             .into_iter()
-            .map(|name| DatabaseInfo { name, accessible: true })
+            .map(|name| DatabaseInfo {
+                name,
+                accessible: true,
+            })
             .collect())
     }
     async fn get_tables(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 视图列表（不含表；row_count/engine 一般无值）
     async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 视图的创建定义 SQL（只读展示用）
-    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError>;
+    async fn get_view_definition(
+        &self,
+        database: Option<&str>,
+        view: &str,
+    ) -> Result<String, DatabaseError>;
     /// 触发器列表（comment 字段附带目标表/事件说明，驱动不支持时返回空列表）
     async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 触发器的创建定义 SQL（只读展示用）
-    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError>;
+    async fn get_trigger_definition(
+        &self,
+        database: Option<&str>,
+        trigger: &str,
+    ) -> Result<String, DatabaseError>;
     /// 存储过程列表（驱动不支持时返回空列表，如 SQLite）
-    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
+    async fn get_procedures(&self, database: Option<&str>)
+        -> Result<Vec<TableInfo>, DatabaseError>;
     /// 存储过程的创建定义 SQL（只读展示用）
-    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError>;
+    async fn get_procedure_definition(
+        &self,
+        database: Option<&str>,
+        procedure: &str,
+    ) -> Result<String, DatabaseError>;
     /// 函数列表（驱动不支持时返回空列表，如 SQLite）
     async fn get_functions(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError>;
     /// 函数的创建定义 SQL（只读展示用）
-    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError>;
+    async fn get_function_definition(
+        &self,
+        database: Option<&str>,
+        function: &str,
+    ) -> Result<String, DatabaseError>;
     /// 账号列表（服务器级；database 仅用于选择连接上下文）
     async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError>;
     /// 当前会话用户及其授权（可读文本列表）
-    async fn get_current_user(&self, database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError>;
-    async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError>;
-    async fn get_indexes(&self, database: Option<&str>, table: &str) -> Result<Vec<IndexInfo>, DatabaseError>;
-    async fn get_foreign_keys(&self, database: Option<&str>, table: &str) -> Result<Vec<ForeignKeyInfo>, DatabaseError>;
+    async fn get_current_user(
+        &self,
+        database: Option<&str>,
+    ) -> Result<CurrentUserInfo, DatabaseError>;
+    async fn get_columns(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError>;
+    async fn get_indexes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<IndexInfo>, DatabaseError>;
+    async fn get_foreign_keys(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyInfo>, DatabaseError>;
 
     /// 在一个事务里批量执行写语句（数据网格编辑提交用），返回总影响行数，失败整体回滚
-    async fn execute_batch(&self, sqls: Vec<String>, database: Option<&str>) -> Result<u64, DatabaseError>;
+    async fn execute_batch(
+        &self,
+        sqls: Vec<String>,
+        database: Option<&str>,
+    ) -> Result<u64, DatabaseError>;
 
     /// 整表导出 CSV 到指定路径，返回导出行数（不受查询行数上限限制）
-    async fn export_table_csv(&self, database: Option<&str>, table: &str, path: &str) -> Result<u64, DatabaseError>;
+    async fn export_table_csv(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        path: &str,
+    ) -> Result<u64, DatabaseError>;
 
     /// 生成单表转储 SQL（DROP + CREATE + 可选 INSERT），返回 (SQL 文本, 数据行数)
-    async fn dump_table(&self, database: Option<&str>, table: &str, include_drop: bool, include_data: bool) -> Result<(String, u64), DatabaseError>;
+    async fn dump_table(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        include_drop: bool,
+        include_data: bool,
+    ) -> Result<(String, u64), DatabaseError>;
 
     async fn disconnect(&self) -> Result<(), DatabaseError>;
 
@@ -76,21 +136,29 @@ pub fn write_csv(
     rows: Vec<Vec<Option<serde_json::Value>>>,
 ) -> Result<u64, DatabaseError> {
     let mut out = String::new();
-    out.push_str(&columns.iter().map(|c| csv_escape(c)).collect::<Vec<_>>().join(","));
+    out.push_str(
+        &columns
+            .iter()
+            .map(|c| csv_escape(c))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
     out.push('\n');
 
     let mut count = 0u64;
     for row in rows {
-        let line = row.iter().map(|v| {
-            match v {
+        let line = row
+            .iter()
+            .map(|v| match v {
                 None => String::new(),
                 Some(serde_json::Value::Null) => String::new(),
                 Some(serde_json::Value::Number(n)) => n.to_string(),
                 Some(serde_json::Value::Bool(b)) => b.to_string(),
                 Some(serde_json::Value::String(s)) => csv_escape(s),
                 Some(other) => csv_escape(&other.to_string()),
-            }
-        }).collect::<Vec<_>>().join(",");
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         out.push_str(&line);
         out.push('\n');
         count += 1;
@@ -174,13 +242,15 @@ pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseEr
         "postgres" | "postgresql" => postgres::test_connection(config).await,
         "sqlite" => sqlite::test_connection(config).await,
         "sqlserver" | "mssql" => mssql::test_connection(config).await,
-        _ => Err(DatabaseError::DriverNotSupported(config.driver_type.clone())),
+        _ => Err(DatabaseError::DriverNotSupported(
+            config.driver_type.clone(),
+        )),
     }
 }
 
 /// 创建并连接驱动
 pub async fn create_and_connect_driver(
-    config: &ConnectionConfig
+    config: &ConnectionConfig,
 ) -> Result<Arc<dyn DatabaseDriver>, DatabaseError> {
     match config.driver_type.as_str() {
         "mysql" | "mariadb" => {
@@ -199,6 +269,8 @@ pub async fn create_and_connect_driver(
             let driver = mssql::MsSqlDriver::connect(config).await?;
             Ok(Arc::new(driver))
         }
-        _ => Err(DatabaseError::DriverNotSupported(config.driver_type.clone())),
+        _ => Err(DatabaseError::DriverNotSupported(
+            config.driver_type.clone(),
+        )),
     }
 }

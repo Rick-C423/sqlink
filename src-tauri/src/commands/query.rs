@@ -1,7 +1,7 @@
-use tauri::State;
 use crate::database::pool::ConnectionPoolManager;
 use crate::database::returns_rows;
 use crate::models::*;
+use tauri::State;
 
 #[tauri::command]
 pub async fn query_execute(
@@ -13,7 +13,9 @@ pub async fn query_execute(
     record: Option<bool>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<QueryResult, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
 
     // 语句类型用于日志（SELECT/INSERT/…），不记完整 SQL，避免敏感数据进日志
@@ -60,9 +62,14 @@ pub async fn query_cancel(
     query_id: u64,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<(), String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.cancel_query(query_id).await.map_err(|e| e.to_string())
+    driver
+        .cancel_query(query_id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -72,9 +79,14 @@ pub async fn query_execute_batch(
     statements: Vec<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<u64, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.execute_batch(statements, database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .execute_batch(statements, database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 整表导出 CSV，返回导出行数
@@ -86,9 +98,14 @@ pub async fn table_export_csv(
     path: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<u64, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.export_table_csv(database.as_deref(), &table, &path).await.map_err(|e| e.to_string())
+    driver
+        .export_table_csv(database.as_deref(), &table, &path)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -96,7 +113,9 @@ pub async fn schema_get_databases(
     connection_id: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<String>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
     driver.get_databases().await.map_err(|e| e.to_string())
 }
@@ -106,7 +125,9 @@ pub async fn schema_get_database_infos(
     connection_id: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<DatabaseInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
     driver.get_database_infos().await.map_err(|e| e.to_string())
 }
@@ -117,9 +138,14 @@ pub async fn schema_get_tables(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<TableInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_tables(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_tables(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -129,9 +155,14 @@ pub async fn schema_get_columns(
     table: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<ColumnInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_columns(database.as_deref(), &table).await.map_err(|e| e.to_string())
+    driver
+        .get_columns(database.as_deref(), &table)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -141,9 +172,14 @@ pub async fn schema_get_indexes(
     table: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<IndexInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_indexes(database.as_deref(), &table).await.map_err(|e| e.to_string())
+    driver
+        .get_indexes(database.as_deref(), &table)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -153,9 +189,14 @@ pub async fn schema_get_foreign_keys(
     table: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<ForeignKeyInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_foreign_keys(database.as_deref(), &table).await.map_err(|e| e.to_string())
+    driver
+        .get_foreign_keys(database.as_deref(), &table)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -164,9 +205,14 @@ pub async fn schema_get_views(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<TableInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_views(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_views(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -176,9 +222,14 @@ pub async fn schema_get_view_definition(
     view: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<String, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_view_definition(database.as_deref(), &view).await.map_err(|e| e.to_string())
+    driver
+        .get_view_definition(database.as_deref(), &view)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -187,9 +238,14 @@ pub async fn schema_get_triggers(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<TableInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_triggers(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_triggers(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -199,9 +255,14 @@ pub async fn schema_get_trigger_definition(
     trigger: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<String, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_trigger_definition(database.as_deref(), &trigger).await.map_err(|e| e.to_string())
+    driver
+        .get_trigger_definition(database.as_deref(), &trigger)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -210,9 +271,14 @@ pub async fn schema_get_procedures(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<TableInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_procedures(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_procedures(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -222,9 +288,14 @@ pub async fn schema_get_procedure_definition(
     procedure: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<String, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_procedure_definition(database.as_deref(), &procedure).await.map_err(|e| e.to_string())
+    driver
+        .get_procedure_definition(database.as_deref(), &procedure)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -233,9 +304,14 @@ pub async fn schema_get_functions(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<TableInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_functions(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_functions(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -245,9 +321,14 @@ pub async fn schema_get_function_definition(
     function: String,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<String, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_function_definition(database.as_deref(), &function).await.map_err(|e| e.to_string())
+    driver
+        .get_function_definition(database.as_deref(), &function)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -256,9 +337,14 @@ pub async fn schema_get_users(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<Vec<DbUserInfo>, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_users(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_users(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -267,7 +353,12 @@ pub async fn schema_get_current_user(
     database: Option<String>,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<CurrentUserInfo, String> {
-    let driver = manager.get_connection(&connection_id).await
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
         .map_err(|e| e.to_string())?;
-    driver.get_current_user(database.as_deref()).await.map_err(|e| e.to_string())
+    driver
+        .get_current_user(database.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }

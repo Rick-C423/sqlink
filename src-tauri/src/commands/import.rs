@@ -139,7 +139,9 @@ pub async fn sql_dump_file(
             .dump_table(Some(&db), t, include_drop, include_data)
             .await
             .map_err(|e| format!("导出表 {} 失败: {}", t, e))?;
-        writer.write_all(sql.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+        writer
+            .write_all(sql.as_bytes())
+            .map_err(|e| format!("写入文件失败: {}", e))?;
         total_rows += rows;
     }
     writer.flush().map_err(|e| format!("写入文件失败: {}", e))?;

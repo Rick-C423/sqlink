@@ -1,13 +1,13 @@
+use crate::database::DatabaseDriver;
+use crate::models::*;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tiberius::ColumnType;
+use tiberius::{AuthMethod, Client, Config};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
-use tiberius::{AuthMethod, Client, Config};
-use tiberius::ColumnType;
-use crate::database::DatabaseDriver;
-use crate::models::*;
 
 /// 单次查询最多返回的行数（与其他驱动一致）
 const MAX_ROWS: usize = 10_000;
@@ -23,7 +23,8 @@ pub struct MsSqlDriver {
 
 impl MsSqlDriver {
     pub async fn connect(config: &ConnectionConfig) -> Result<Self, DatabaseError> {
-        let client = connect_client(config, config.database.as_deref().filter(|d| !d.is_empty())).await?;
+        let client =
+            connect_client(config, config.database.as_deref().filter(|d| !d.is_empty())).await?;
         Ok(Self {
             connected: AtomicBool::new(true),
             client: Mutex::new(client),
@@ -31,14 +32,19 @@ impl MsSqlDriver {
     }
 
     /// 锁定客户端并按需切换数据库上下文（USE [db]）
-    async fn client_for<'a>(&'a self, database: Option<&str>) -> Result<tokio::sync::MutexGuard<'a, TdsClient>, DatabaseError> {
+    async fn client_for<'a>(
+        &'a self,
+        database: Option<&str>,
+    ) -> Result<tokio::sync::MutexGuard<'a, TdsClient>, DatabaseError> {
         let mut client = self.client.lock().await;
         if let Some(db) = database.filter(|d| !d.is_empty()) {
-            let esc = db.replace(']', "]]" );
+            let esc = db.replace(']', "]]");
             client
                 .simple_query(format!("USE [{}]", esc))
                 .await
-                .map_err(|e| DatabaseError::ConnectionError(format!("切换数据库 {} 失败: {}", db, e)))?;
+                .map_err(|e| {
+                    DatabaseError::ConnectionError(format!("切换数据库 {} 失败: {}", db, e))
+                })?;
         }
         Ok(client)
     }
@@ -75,7 +81,10 @@ async fn try_connect(
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))
 }
 
-async fn connect_client(config: &ConnectionConfig, database: Option<&str>) -> Result<TdsClient, DatabaseError> {
+async fn connect_client(
+    config: &ConnectionConfig,
+    database: Option<&str>,
+) -> Result<TdsClient, DatabaseError> {
     // 与 JDBC encrypt=false 语义一致：关闭时直接声明不支持加密，避免先进行一次
     // 注定失败或超时的 TLS 握手。需要加密的服务器可在连接配置中显式开启。
     let encryption = if config.encrypt.unwrap_or(false) {
@@ -87,7 +96,8 @@ async fn connect_client(config: &ConnectionConfig, database: Option<&str>) -> Re
 }
 
 pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseError> {
-    let mut client = connect_client(config, config.database.as_deref().filter(|d| !d.is_empty())).await?;
+    let mut client =
+        connect_client(config, config.database.as_deref().filter(|d| !d.is_empty())).await?;
     client
         .simple_query("SELECT 1")
         .await
@@ -113,7 +123,12 @@ impl DatabaseDriver for MsSqlDriver {
         self.connected.load(Ordering::Relaxed)
     }
 
-    async fn query(&self, sql: &str, database: Option<&str>, _query_id: Option<u64>) -> Result<QueryResult, DatabaseError> {
+    async fn query(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        _query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError> {
         let start = std::time::Instant::now();
         let mut client = self.client_for(database).await?;
 
@@ -125,15 +140,19 @@ impl DatabaseDriver for MsSqlDriver {
         let mut truncated = false;
 
         if let Some(first) = tds_rows.first() {
-            columns = first.columns().iter().map(|col| ColumnMetadata {
-                name: col.name().to_string(),
-                data_type: format!("{:?}", col.column_type()),
-                unified_type: "Unknown".to_string(),
-                nullable: true,
-                length: None,
-                precision: None,
-                scale: None,
-            }).collect();
+            columns = first
+                .columns()
+                .iter()
+                .map(|col| ColumnMetadata {
+                    name: col.name().to_string(),
+                    data_type: format!("{:?}", col.column_type()),
+                    unified_type: "Unknown".to_string(),
+                    nullable: true,
+                    length: None,
+                    precision: None,
+                    scale: None,
+                })
+                .collect();
         }
 
         for row in &tds_rows {
@@ -141,7 +160,10 @@ impl DatabaseDriver for MsSqlDriver {
                 truncated = true;
                 break;
             }
-            let values = row.columns().iter().enumerate()
+            let values = row
+                .columns()
+                .iter()
+                .enumerate()
                 .map(|(idx, col)| Some(mssql_value_to_json(row, idx, &col.column_type())))
                 .collect();
             rows.push(RowData { values });
@@ -159,7 +181,12 @@ impl DatabaseDriver for MsSqlDriver {
         })
     }
 
-    async fn execute(&self, sql: &str, database: Option<&str>, _query_id: Option<u64>) -> Result<QueryResult, DatabaseError> {
+    async fn execute(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        _query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError> {
         let start = std::time::Instant::now();
         let mut client = self.client_for(database).await?;
         let res = client.execute(sql, &[]).await.map_err(map_exec_err)?;
@@ -176,7 +203,9 @@ impl DatabaseDriver for MsSqlDriver {
     }
 
     async fn cancel_query(&self, _query_id: u64) -> Result<(), DatabaseError> {
-        Err(DatabaseError::Unknown("SQL Server 驱动暂不支持取消查询".into()))
+        Err(DatabaseError::Unknown(
+            "SQL Server 驱动暂不支持取消查询".into(),
+        ))
     }
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError> {
@@ -193,70 +222,94 @@ impl DatabaseDriver for MsSqlDriver {
 
     async fn get_database_infos(&self) -> Result<Vec<DatabaseInfo>, DatabaseError> {
         let mut client = self.client_for(None).await?;
-        let stream = client.simple_query(
-            "SELECT name, CASE WHEN HAS_DBACCESS(name) = 1 THEN 1 ELSE 0 END \
+        let stream = client
+            .simple_query(
+                "SELECT name, CASE WHEN HAS_DBACCESS(name) = 1 THEN 1 ELSE 0 END \
              FROM sys.databases WHERE state = 0 ORDER BY name",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        Ok(rows.iter().map(|row| DatabaseInfo {
-            name: row.get::<&str, _>(0).unwrap_or("").to_string(),
-            accessible: row.get::<i32, _>(1).unwrap_or(0) == 1,
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| DatabaseInfo {
+                name: row.get::<&str, _>(0).unwrap_or("").to_string(),
+                accessible: row.get::<i32, _>(1).unwrap_or(0) == 1,
+            })
+            .collect())
     }
 
     async fn get_tables(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
-        let stream = client.simple_query(
-            "SELECT t.name, SCHEMA_NAME(t.schema_id), COALESCE(SUM(p.rows), 0) \
+        let stream = client
+            .simple_query(
+                "SELECT t.name, SCHEMA_NAME(t.schema_id), COALESCE(SUM(p.rows), 0) \
              FROM sys.tables t \
              LEFT JOIN sys.partitions p ON p.object_id = t.object_id AND p.index_id IN (0,1) \
              GROUP BY t.name, t.schema_id ORDER BY t.name",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        let tables = rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let schema: Option<&str> = row.get(1);
-            TableInfo {
-                name: name.to_string(),
-                schema: schema.map(|s| s.to_string()),
-                row_count: row.get::<i64, _>(2).or_else(|| row.get::<i32, _>(2).map(|v| v as i64)),
-                engine: None,
-                comment: None,
-            }
-        }).collect();
+        let tables = rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let schema: Option<&str> = row.get(1);
+                TableInfo {
+                    name: name.to_string(),
+                    schema: schema.map(|s| s.to_string()),
+                    row_count: row
+                        .get::<i64, _>(2)
+                        .or_else(|| row.get::<i32, _>(2).map(|v| v as i64)),
+                    engine: None,
+                    comment: None,
+                }
+            })
+            .collect();
         Ok(tables)
     }
 
     async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
-        let stream = client.simple_query(
-            "SELECT v.name, SCHEMA_NAME(v.schema_id) \
+        let stream = client
+            .simple_query(
+                "SELECT v.name, SCHEMA_NAME(v.schema_id) \
              FROM sys.views v ORDER BY v.name",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let schema: Option<&str> = row.get(1);
-            TableInfo {
-                name: name.to_string(),
-                schema: schema.map(|s| s.to_string()),
-                row_count: None,
-                engine: None,
-                comment: None,
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let schema: Option<&str> = row.get(1);
+                TableInfo {
+                    name: name.to_string(),
+                    schema: schema.map(|s| s.to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: None,
+                }
+            })
+            .collect())
     }
 
-    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+    async fn get_view_definition(
+        &self,
+        database: Option<&str>,
+        view: &str,
+    ) -> Result<String, DatabaseError> {
         let mut client = self.client_for(database).await?;
         // OBJECT_DEFINITION 返回 CREATE VIEW 完整文本
-        let stream = client.query(
-            "SELECT OBJECT_DEFINITION(OBJECT_ID(@P1, 'V'))",
-            &[&view],
-        ).await.map_err(map_query_err)?;
+        let stream = client
+            .query("SELECT OBJECT_DEFINITION(OBJECT_ID(@P1, 'V'))", &[&view])
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
         rows.first()
             .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
@@ -266,28 +319,38 @@ impl DatabaseDriver for MsSqlDriver {
     async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         // parent_id = 0 的是数据库级 DDL 触发器，其余挂在表/视图上
-        let stream = client.simple_query(
-            "SELECT t.name, SCHEMA_NAME(o.schema_id), COALESCE(o.name, 'DATABASE') \
+        let stream = client
+            .simple_query(
+                "SELECT t.name, SCHEMA_NAME(o.schema_id), COALESCE(o.name, 'DATABASE') \
              FROM sys.triggers t LEFT JOIN sys.objects o ON t.parent_id = o.object_id \
              ORDER BY t.name",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let schema: Option<&str> = row.get(1);
-            let parent: &str = row.get(2).unwrap_or("");
-            TableInfo {
-                name: name.to_string(),
-                schema: schema.map(|s| s.to_string()),
-                row_count: None,
-                engine: None,
-                comment: Some(format!("ON {}", parent)),
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let schema: Option<&str> = row.get(1);
+                let parent: &str = row.get(2).unwrap_or("");
+                TableInfo {
+                    name: name.to_string(),
+                    schema: schema.map(|s| s.to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: Some(format!("ON {}", parent)),
+                }
+            })
+            .collect())
     }
 
-    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+    async fn get_trigger_definition(
+        &self,
+        database: Option<&str>,
+        trigger: &str,
+    ) -> Result<String, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let stream = client.query(
             "SELECT TOP 1 OBJECT_DEFINITION(t.object_id) FROM sys.triggers t WHERE t.name = @P1",
@@ -299,27 +362,40 @@ impl DatabaseDriver for MsSqlDriver {
             .ok_or_else(|| DatabaseError::Unknown(format!("触发器 {} 定义为空", trigger)))
     }
 
-    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+    async fn get_procedures(
+        &self,
+        database: Option<&str>,
+    ) -> Result<Vec<TableInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
-        let stream = client.simple_query(
-            "SELECT p.name, SCHEMA_NAME(p.schema_id) FROM sys.procedures p ORDER BY p.name",
-        ).await.map_err(map_query_err)?;
+        let stream = client
+            .simple_query(
+                "SELECT p.name, SCHEMA_NAME(p.schema_id) FROM sys.procedures p ORDER BY p.name",
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let schema: Option<&str> = row.get(1);
-            TableInfo {
-                name: name.to_string(),
-                schema: schema.map(|s| s.to_string()),
-                row_count: None,
-                engine: None,
-                comment: None,
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let schema: Option<&str> = row.get(1);
+                TableInfo {
+                    name: name.to_string(),
+                    schema: schema.map(|s| s.to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: None,
+                }
+            })
+            .collect())
     }
 
-    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
+    async fn get_procedure_definition(
+        &self,
+        database: Option<&str>,
+        procedure: &str,
+    ) -> Result<String, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let stream = client.query(
             "SELECT TOP 1 OBJECT_DEFINITION(p.object_id) FROM sys.procedures p WHERE p.name = @P1",
@@ -334,33 +410,46 @@ impl DatabaseDriver for MsSqlDriver {
     async fn get_functions(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         // FN = 标量函数, IF = 内联表值函数, TF = 多语句表值函数
-        let stream = client.simple_query(
-            "SELECT o.name, SCHEMA_NAME(o.schema_id), o.type \
+        let stream = client
+            .simple_query(
+                "SELECT o.name, SCHEMA_NAME(o.schema_id), o.type \
              FROM sys.objects o WHERE o.type IN ('FN', 'IF', 'TF') ORDER BY o.name",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let schema: Option<&str> = row.get(1);
-            let kind: &str = row.get(2).unwrap_or("");
-            TableInfo {
-                name: name.to_string(),
-                schema: schema.map(|s| s.to_string()),
-                row_count: None,
-                engine: Some(kind.to_string()),
-                comment: None,
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let schema: Option<&str> = row.get(1);
+                let kind: &str = row.get(2).unwrap_or("");
+                TableInfo {
+                    name: name.to_string(),
+                    schema: schema.map(|s| s.to_string()),
+                    row_count: None,
+                    engine: Some(kind.to_string()),
+                    comment: None,
+                }
+            })
+            .collect())
     }
 
-    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
+    async fn get_function_definition(
+        &self,
+        database: Option<&str>,
+        function: &str,
+    ) -> Result<String, DatabaseError> {
         let mut client = self.client_for(database).await?;
-        let stream = client.query(
-            "SELECT TOP 1 OBJECT_DEFINITION(o.object_id) FROM sys.objects o \
+        let stream = client
+            .query(
+                "SELECT TOP 1 OBJECT_DEFINITION(o.object_id) FROM sys.objects o \
              WHERE o.name = @P1 AND o.type IN ('FN', 'IF', 'TF')",
-            &[&function],
-        ).await.map_err(map_query_err)?;
+                &[&function],
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
         rows.first()
             .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
@@ -370,34 +459,52 @@ impl DatabaseDriver for MsSqlDriver {
     async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         // 服务器级登录名：SQL 登录 + Windows 登录，排除系统内置
-        let stream = client.simple_query(
-            "SELECT name, type_desc FROM sys.server_principals \
+        let stream = client
+            .simple_query(
+                "SELECT name, type_desc FROM sys.server_principals \
              WHERE type IN ('S', 'U') AND name NOT LIKE '##%' AND name <> 'sa' \
              ORDER BY name",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
-        Ok(rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let type_desc: &str = row.get(1).unwrap_or("");
-            DbUserInfo {
-                name: name.to_string(),
-                host: None,
-                note: Some(if type_desc.contains("SQL") { "SQL 登录".to_string() } else { "Windows 登录".to_string() }),
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let type_desc: &str = row.get(1).unwrap_or("");
+                DbUserInfo {
+                    name: name.to_string(),
+                    host: None,
+                    note: Some(if type_desc.contains("SQL") {
+                        "SQL 登录".to_string()
+                    } else {
+                        "Windows 登录".to_string()
+                    }),
+                }
+            })
+            .collect())
     }
 
-    async fn get_current_user(&self, database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+    async fn get_current_user(
+        &self,
+        database: Option<&str>,
+    ) -> Result<CurrentUserInfo, DatabaseError> {
         let mut client = self.client_for(database).await?;
-        let stream = client.simple_query("SELECT SUSER_NAME()").await.map_err(map_query_err)?;
+        let stream = client
+            .simple_query("SELECT SUSER_NAME()")
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
-        let user = rows.first()
+        let user = rows
+            .first()
             .and_then(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
 
         // 服务器级权限 + 服务器角色成员
-        let stream = client.simple_query(
-            "SELECT sp.state_desc + ' ' + sp.permission_name \
+        let stream = client
+            .simple_query(
+                "SELECT sp.state_desc + ' ' + sp.permission_name \
              FROM sys.server_permissions sp \
              JOIN sys.server_principals p ON sp.grantee_principal_id = p.principal_id \
              WHERE p.name = SUSER_NAME() AND sp.major_id = 0 \
@@ -407,15 +514,22 @@ impl DatabaseDriver for MsSqlDriver {
              JOIN sys.server_principals r ON m.role_principal_id = r.principal_id \
              JOIN sys.server_principals u ON m.member_principal_id = u.principal_id \
              WHERE u.name = SUSER_NAME()",
-        ).await.map_err(map_query_err)?;
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
-        let grants = rows.iter()
+        let grants = rows
+            .iter()
             .filter_map(|r| r.get::<&str, _>(0).map(|s| s.to_string()))
             .collect();
         Ok(CurrentUserInfo { user, grants })
     }
 
-    async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
+    async fn get_columns(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let stream = client.query(
             "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT, \
@@ -439,38 +553,48 @@ impl DatabaseDriver for MsSqlDriver {
         ).await.map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        let columns = rows.iter().map(|row| {
-            let name: &str = row.get(0).unwrap_or("");
-            let data_type: &str = row.get(1).unwrap_or("");
-            let nullable: &str = row.get(2).unwrap_or("YES");
-            let default: Option<&str> = row.get(3);
-            let is_pk: i32 = row.get(4).unwrap_or(0);
-            let comment: Option<&str> = row.get(5);
-            ColumnInfo {
-                name: name.to_string(),
-                data_type: data_type.to_string(),
-                nullable: nullable == "YES",
-                is_primary_key: is_pk == 1,
-                default_value: default.map(|s| s.to_string()),
-                extra: None,
-                comment: comment.map(|s| s.to_string()),
-            }
-        }).collect();
+        let columns = rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let data_type: &str = row.get(1).unwrap_or("");
+                let nullable: &str = row.get(2).unwrap_or("YES");
+                let default: Option<&str> = row.get(3);
+                let is_pk: i32 = row.get(4).unwrap_or(0);
+                let comment: Option<&str> = row.get(5);
+                ColumnInfo {
+                    name: name.to_string(),
+                    data_type: data_type.to_string(),
+                    nullable: nullable == "YES",
+                    is_primary_key: is_pk == 1,
+                    default_value: default.map(|s| s.to_string()),
+                    extra: None,
+                    comment: comment.map(|s| s.to_string()),
+                }
+            })
+            .collect();
         Ok(columns)
     }
 
-    async fn get_indexes(&self, database: Option<&str>, table: &str) -> Result<Vec<IndexInfo>, DatabaseError> {
+    async fn get_indexes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<IndexInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
-        let stream = client.query(
-            "SELECT i.name, i.is_unique, i.is_primary_key, c.name \
+        let stream = client
+            .query(
+                "SELECT i.name, i.is_unique, i.is_primary_key, c.name \
              FROM sys.indexes i \
              JOIN sys.tables t ON t.object_id = i.object_id \
              JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id \
              JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id \
              WHERE t.name = @P1 AND i.type > 0 \
              ORDER BY i.name, ic.key_ordinal",
-            &[&table],
-        ).await.map_err(map_query_err)?;
+                &[&table],
+            )
+            .await
+            .map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
         let mut order: Vec<String> = Vec::new();
@@ -486,17 +610,24 @@ impl DatabaseDriver for MsSqlDriver {
             });
             entry.2.push(col.to_string());
         }
-        Ok(order.into_iter().filter_map(|n| {
-            map.remove(&n).map(|(unique, primary, columns)| IndexInfo {
-                is_primary: primary,
-                is_unique: unique,
-                name: n,
-                columns,
+        Ok(order
+            .into_iter()
+            .filter_map(|n| {
+                map.remove(&n).map(|(unique, primary, columns)| IndexInfo {
+                    is_primary: primary,
+                    is_unique: unique,
+                    name: n,
+                    columns,
+                })
             })
-        }).collect())
+            .collect())
     }
 
-    async fn get_foreign_keys(&self, database: Option<&str>, table: &str) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
+    async fn get_foreign_keys(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let stream = client.query(
             "SELECT fk.name, pc.name, rt.name, rc.name, \
@@ -537,10 +668,17 @@ impl DatabaseDriver for MsSqlDriver {
         Ok(order.into_iter().filter_map(|n| map.remove(&n)).collect())
     }
 
-    async fn execute_batch(&self, sqls: Vec<String>, database: Option<&str>) -> Result<u64, DatabaseError> {
+    async fn execute_batch(
+        &self,
+        sqls: Vec<String>,
+        database: Option<&str>,
+    ) -> Result<u64, DatabaseError> {
         let mut client = self.client_for(database).await?;
 
-        client.simple_query("BEGIN TRAN").await.map_err(map_exec_err)?;
+        client
+            .simple_query("BEGIN TRAN")
+            .await
+            .map_err(map_exec_err)?;
 
         let mut total: u64 = 0;
         for sql in &sqls {
@@ -553,22 +691,34 @@ impl DatabaseDriver for MsSqlDriver {
             }
         }
 
-        client.simple_query("COMMIT TRAN").await.map_err(map_exec_err)?;
+        client
+            .simple_query("COMMIT TRAN")
+            .await
+            .map_err(map_exec_err)?;
         Ok(total)
     }
 
-    async fn export_table_csv(&self, database: Option<&str>, table: &str, path: &str) -> Result<u64, DatabaseError> {
+    async fn export_table_csv(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        path: &str,
+    ) -> Result<u64, DatabaseError> {
         let mut client = self.client_for(database).await?;
         let sql = format!("SELECT * FROM [{}]", self.escape_identifier(table));
         let stream = client.simple_query(sql).await.map_err(map_query_err)?;
         let rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        let columns: Vec<String> = rows.first()
+        let columns: Vec<String> = rows
+            .first()
             .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
             .unwrap_or_default();
-        let data: Vec<Vec<Option<serde_json::Value>>> = rows.iter()
+        let data: Vec<Vec<Option<serde_json::Value>>> = rows
+            .iter()
             .map(|r| {
-                r.columns().iter().enumerate()
+                r.columns()
+                    .iter()
+                    .enumerate()
                     .map(|(i, c)| Some(mssql_value_to_json(r, i, &c.column_type())))
                     .collect()
             })
@@ -577,7 +727,13 @@ impl DatabaseDriver for MsSqlDriver {
         crate::database::write_csv(path, &columns, data)
     }
 
-    async fn dump_table(&self, database: Option<&str>, table: &str, include_drop: bool, include_data: bool) -> Result<(String, u64), DatabaseError> {
+    async fn dump_table(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        include_drop: bool,
+        include_data: bool,
+    ) -> Result<(String, u64), DatabaseError> {
         let esc = self.escape_identifier(table);
 
         let mut out = String::new();
@@ -592,22 +748,30 @@ impl DatabaseDriver for MsSqlDriver {
         if cols.is_empty() {
             return Err(DatabaseError::Unknown(format!("表 {} 不存在或无列", table)));
         }
-        let mut defs: Vec<String> = cols.iter().map(|c| {
-            let mut d = format!("[{}] {}", self.escape_identifier(&c.name), c.data_type);
-            if let Some(def) = &c.default_value {
-                d.push_str(&format!(" DEFAULT {}", def));
-            }
-            d.push_str(if c.nullable { " NULL" } else { " NOT NULL" });
-            d
-        }).collect();
-        let pk: Vec<String> = cols.iter()
+        let mut defs: Vec<String> = cols
+            .iter()
+            .map(|c| {
+                let mut d = format!("[{}] {}", self.escape_identifier(&c.name), c.data_type);
+                if let Some(def) = &c.default_value {
+                    d.push_str(&format!(" DEFAULT {}", def));
+                }
+                d.push_str(if c.nullable { " NULL" } else { " NOT NULL" });
+                d
+            })
+            .collect();
+        let pk: Vec<String> = cols
+            .iter()
             .filter(|c| c.is_primary_key)
             .map(|c| format!("[{}]", self.escape_identifier(&c.name)))
             .collect();
         if !pk.is_empty() {
             defs.push(format!("PRIMARY KEY ({})", pk.join(", ")));
         }
-        out.push_str(&format!("CREATE TABLE [{}] (\n  {}\n);\n\n", esc, defs.join(",\n  ")));
+        out.push_str(&format!(
+            "CREATE TABLE [{}] (\n  {}\n);\n\n",
+            esc,
+            defs.join(",\n  ")
+        ));
 
         let mut rows_written = 0u64;
         if include_data {
@@ -617,17 +781,22 @@ impl DatabaseDriver for MsSqlDriver {
                 .await
                 .map_err(map_query_err)?;
             let rows = stream.into_first_result().await.map_err(map_query_err)?;
-            let columns: Vec<String> = rows.first()
+            let columns: Vec<String> = rows
+                .first()
                 .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
                 .unwrap_or_default();
-            let data: Vec<Vec<Option<serde_json::Value>>> = rows.iter()
+            let data: Vec<Vec<Option<serde_json::Value>>> = rows
+                .iter()
                 .map(|r| {
-                    r.columns().iter().enumerate()
+                    r.columns()
+                        .iter()
+                        .enumerate()
                         .map(|(i, c)| Some(mssql_value_to_json(r, i, &c.column_type())))
                         .collect()
                 })
                 .collect();
-            let quoted_cols = columns.iter()
+            let quoted_cols = columns
+                .iter()
                 .map(|c| format!("[{}]", self.escape_identifier(c)))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -649,7 +818,7 @@ impl DatabaseDriver for MsSqlDriver {
     }
 
     fn escape_identifier(&self, identifier: &str) -> String {
-        identifier.replace(']', "]]" )
+        identifier.replace(']', "]]")
     }
 }
 
@@ -684,14 +853,31 @@ fn mssql_value_to_json(row: &tiberius::Row, idx: usize, ty: &ColumnType) -> serd
     get!(f64);
     get!(f32);
     get!(&str);
-    get_str!(tiberius::numeric::Numeric, |v: tiberius::numeric::Numeric| v.to_string());
+    get_str!(
+        tiberius::numeric::Numeric,
+        |v: tiberius::numeric::Numeric| v.to_string()
+    );
     get_str!(uuid::Uuid, |v: uuid::Uuid| v.to_string());
-    get_str!(chrono::NaiveDateTime, |v: chrono::NaiveDateTime| v.format("%Y-%m-%d %H:%M:%S").to_string());
-    get_str!(chrono::NaiveDate, |v: chrono::NaiveDate| v.format("%Y-%m-%d").to_string());
-    get_str!(chrono::NaiveTime, |v: chrono::NaiveTime| v.format("%H:%M:%S").to_string());
-    get_str!(chrono::DateTime<chrono::Utc>, |v: chrono::DateTime<chrono::Utc>| v.format("%Y-%m-%d %H:%M:%S %z").to_string());
-    get_str!(&[u8], |v: &[u8]| format!("\\x{}", v.iter().map(|b| format!("{:02x}", b)).collect::<String>()));
-    get_str!(&tiberius::xml::XmlData, |v: &tiberius::xml::XmlData| v.to_string());
+    get_str!(chrono::NaiveDateTime, |v: chrono::NaiveDateTime| v
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string());
+    get_str!(chrono::NaiveDate, |v: chrono::NaiveDate| v
+        .format("%Y-%m-%d")
+        .to_string());
+    get_str!(chrono::NaiveTime, |v: chrono::NaiveTime| v
+        .format("%H:%M:%S")
+        .to_string());
+    get_str!(chrono::DateTime<chrono::Utc>, |v: chrono::DateTime<
+        chrono::Utc,
+    >| v
+        .format("%Y-%m-%d %H:%M:%S %z")
+        .to_string());
+    get_str!(&[u8], |v: &[u8]| format!(
+        "\\x{}",
+        v.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    ));
+    get_str!(&tiberius::xml::XmlData, |v: &tiberius::xml::XmlData| v
+        .to_string());
 
     J::String(format!("‹{:?}›", ty))
 }

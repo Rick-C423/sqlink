@@ -1,12 +1,12 @@
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
-use tokio_postgres::{Client, Config, NoTls};
-use tokio_postgres::types::Type;
 use crate::database::DatabaseDriver;
 use crate::models::*;
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio_postgres::types::Type;
+use tokio_postgres::{Client, Config, NoTls};
 
 /// 单次查询最多返回的行数（与 MySQL 驱动一致）
 const MAX_ROWS: usize = 10_000;
@@ -61,7 +61,10 @@ impl PgDriver {
             }
         }
 
-        let (client, connection) = self.pg_config(&db_name).connect(NoTls).await
+        let (client, connection) = self
+            .pg_config(&db_name)
+            .connect(NoTls)
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
         tokio::spawn(async move {
@@ -76,44 +79,70 @@ impl PgDriver {
     }
 
     /// pg_proc 列表（prokind: 'p' = 存储过程, 'f' = 普通函数；需 PG 11+）
-    async fn get_routines(&self, database: Option<&str>, prokind: &str) -> Result<Vec<TableInfo>, DatabaseError> {
+    async fn get_routines(
+        &self,
+        database: Option<&str>,
+        prokind: &str,
+    ) -> Result<Vec<TableInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
-        let rows = client.query(
-            "SELECT p.proname, pg_get_function_arguments(p.oid) \
+        let rows = client
+            .query(
+                "SELECT p.proname, pg_get_function_arguments(p.oid) \
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
              WHERE n.nspname = 'public' AND p.prokind = $1 ORDER BY p.proname",
-            &[&prokind],
-        ).await.map_err(map_pg_query_error)?;
+                &[&prokind],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let args: String = row.get(1);
-            TableInfo {
-                name,
-                schema: Some("public".to_string()),
-                row_count: None,
-                engine: None,
-                comment: if args.is_empty() { None } else { Some(format!("({})", args)) },
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let args: String = row.get(1);
+                TableInfo {
+                    name,
+                    schema: Some("public".to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: if args.is_empty() {
+                        None
+                    } else {
+                        Some(format!("({})", args))
+                    },
+                }
+            })
+            .collect())
     }
 
     /// pg_get_functiondef 对函数和存储过程都适用（重载时取第一个匹配）
-    async fn get_routine_definition(&self, database: Option<&str>, prokind: &str, name: &str) -> Result<String, DatabaseError> {
+    async fn get_routine_definition(
+        &self,
+        database: Option<&str>,
+        prokind: &str,
+        name: &str,
+    ) -> Result<String, DatabaseError> {
         let client = self.client_for(database).await?;
-        let row = client.query_opt(
-            "SELECT pg_get_functiondef(p.oid) \
+        let row = client
+            .query_opt(
+                "SELECT pg_get_functiondef(p.oid) \
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
              WHERE n.nspname = 'public' AND p.proname = $1 AND p.prokind = $2 LIMIT 1",
-            &[&name, &prokind],
-        ).await.map_err(map_pg_query_error)?;
+                &[&name, &prokind],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
         let def: Option<String> = row.and_then(|r| r.get(0));
         def.ok_or_else(|| DatabaseError::Unknown(format!("过程/函数 {} 不存在", name)))
     }
 }
 
 pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseError> {
-    let db = config.database.as_deref().filter(|d| !d.is_empty()).unwrap_or("postgres");
+    let db = config
+        .database
+        .as_deref()
+        .filter(|d| !d.is_empty())
+        .unwrap_or("postgres");
 
     let mut cfg = Config::new();
     cfg.host(&config.host)
@@ -124,14 +153,18 @@ pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseEr
         cfg.password(&config.password);
     }
 
-    let (client, connection) = cfg.connect(NoTls).await
+    let (client, connection) = cfg
+        .connect(NoTls)
+        .await
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
     tokio::spawn(async move {
         let _ = connection.await;
     });
 
-    client.query_one("SELECT 1", &[]).await
+    client
+        .query_one("SELECT 1", &[])
+        .await
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
     Ok(())
@@ -147,12 +180,20 @@ impl DatabaseDriver for PgDriver {
         self.connected.load(Ordering::Relaxed)
     }
 
-    async fn query(&self, sql: &str, database: Option<&str>, query_id: Option<u64>) -> Result<QueryResult, DatabaseError> {
+    async fn query(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError> {
         let start = std::time::Instant::now();
         let client = self.client_for(database).await?;
 
         if let Some(qid) = query_id {
-            self.cancel_tokens.lock().await.insert(qid, client.cancel_token());
+            self.cancel_tokens
+                .lock()
+                .await
+                .insert(qid, client.cancel_token());
         }
 
         let rows_result = client.query(sql, &[]).await;
@@ -166,15 +207,19 @@ impl DatabaseDriver for PgDriver {
         let mut truncated = false;
 
         if let Some(first) = pg_rows.first() {
-            columns = first.columns().iter().map(|col| ColumnMetadata {
-                name: col.name().to_string(),
-                data_type: format!("{}", col.type_()),
-                unified_type: "Unknown".to_string(),
-                nullable: true, // information_schema 才有准确值，结果集层面默认为 true
-                length: None,
-                precision: None,
-                scale: None,
-            }).collect();
+            columns = first
+                .columns()
+                .iter()
+                .map(|col| ColumnMetadata {
+                    name: col.name().to_string(),
+                    data_type: format!("{}", col.type_()),
+                    unified_type: "Unknown".to_string(),
+                    nullable: true, // information_schema 才有准确值，结果集层面默认为 true
+                    length: None,
+                    precision: None,
+                    scale: None,
+                })
+                .collect();
         }
 
         for pg_row in &pg_rows {
@@ -182,7 +227,10 @@ impl DatabaseDriver for PgDriver {
                 truncated = true;
                 break;
             }
-            let values = pg_row.columns().iter().enumerate()
+            let values = pg_row
+                .columns()
+                .iter()
+                .enumerate()
                 .map(|(idx, col)| Some(pg_value_to_json(pg_row, idx, col.type_())))
                 .collect();
             rows.push(RowData { values });
@@ -200,12 +248,20 @@ impl DatabaseDriver for PgDriver {
         })
     }
 
-    async fn execute(&self, sql: &str, database: Option<&str>, query_id: Option<u64>) -> Result<QueryResult, DatabaseError> {
+    async fn execute(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError> {
         let start = std::time::Instant::now();
         let client = self.client_for(database).await?;
 
         if let Some(qid) = query_id {
-            self.cancel_tokens.lock().await.insert(qid, client.cancel_token());
+            self.cancel_tokens
+                .lock()
+                .await
+                .insert(qid, client.cancel_token());
         }
 
         let exec_result = client.execute(sql, &[]).await;
@@ -228,19 +284,27 @@ impl DatabaseDriver for PgDriver {
     async fn cancel_query(&self, query_id: u64) -> Result<(), DatabaseError> {
         let token = self.cancel_tokens.lock().await.get(&query_id).cloned();
         let token = token.ok_or(DatabaseError::Unknown("查询不存在或已结束".to_string()))?;
-        token.cancel_query(NoTls).await
+        token
+            .cancel_query(NoTls)
+            .await
             .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
         Ok(())
     }
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError> {
-        let result = self.query(
-            "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname",
-            None, None,
-        ).await?;
-        let dbs = result.rows.iter()
+        let result = self
+            .query(
+                "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname",
+                None,
+                None,
+            )
+            .await?;
+        let dbs = result
+            .rows
+            .iter()
             .filter_map(|row| {
-                row.values.first()
+                row.values
+                    .first()
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str().map(|s| s.to_string()))
             })
@@ -251,102 +315,143 @@ impl DatabaseDriver for PgDriver {
     async fn get_tables(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
         // reltuples 是优化器估算值，够用且快；obj_description 取表注释
-        let rows = client.query(
-            "SELECT c.relname, GREATEST(c.reltuples, 0)::bigint, obj_description(c.oid) \
+        let rows = client
+            .query(
+                "SELECT c.relname, GREATEST(c.reltuples, 0)::bigint, obj_description(c.oid) \
              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
              WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname",
-            &[],
-        ).await.map_err(map_pg_query_error)?;
+                &[],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
-        let tables = rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let row_count: i64 = row.get(1);
-            let comment: Option<String> = row.get(2);
-            TableInfo {
-                name,
-                schema: Some("public".to_string()),
-                row_count: Some(row_count),
-                engine: None,
-                comment,
-            }
-        }).collect();
+        let tables = rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let row_count: i64 = row.get(1);
+                let comment: Option<String> = row.get(2);
+                TableInfo {
+                    name,
+                    schema: Some("public".to_string()),
+                    row_count: Some(row_count),
+                    engine: None,
+                    comment,
+                }
+            })
+            .collect();
         Ok(tables)
     }
 
     async fn get_views(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
         // relkind: v = 普通视图, m = 物化视图
-        let rows = client.query(
-            "SELECT c.relname, CASE c.relkind WHEN 'm' THEN 'materialized' ELSE 'view' END \
+        let rows = client
+            .query(
+                "SELECT c.relname, CASE c.relkind WHEN 'm' THEN 'materialized' ELSE 'view' END \
              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
              WHERE n.nspname = 'public' AND c.relkind IN ('v', 'm') ORDER BY c.relname",
-            &[],
-        ).await.map_err(map_pg_query_error)?;
+                &[],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let kind: &str = row.get(1);
-            TableInfo {
-                name,
-                schema: Some("public".to_string()),
-                row_count: None,
-                engine: Some(kind.to_string()),
-                comment: None,
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let kind: &str = row.get(1);
+                TableInfo {
+                    name,
+                    schema: Some("public".to_string()),
+                    row_count: None,
+                    engine: Some(kind.to_string()),
+                    comment: None,
+                }
+            })
+            .collect())
     }
 
-    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+    async fn get_view_definition(
+        &self,
+        database: Option<&str>,
+        view: &str,
+    ) -> Result<String, DatabaseError> {
         let client = self.client_for(database).await?;
-        let row = client.query_opt(
-            "SELECT pg_get_viewdef(format('%I.%I', 'public', $1)::regclass, true)",
-            &[&view],
-        ).await.map_err(map_pg_query_error)?;
+        let row = client
+            .query_opt(
+                "SELECT pg_get_viewdef(format('%I.%I', 'public', $1)::regclass, true)",
+                &[&view],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
         let def: Option<String> = row.and_then(|r| r.get(0));
-        def.map(|d| format!("CREATE OR REPLACE VIEW public.\"{}\" AS\n{}", view.replace('"', "\"\""), d))
-            .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 不存在", view)))
+        def.map(|d| {
+            format!(
+                "CREATE OR REPLACE VIEW public.\"{}\" AS\n{}",
+                view.replace('"', "\"\""),
+                d
+            )
+        })
+        .ok_or_else(|| DatabaseError::Unknown(format!("视图 {} 不存在", view)))
     }
 
     async fn get_triggers(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
         // tgisinternal = false 排除外键等约束内部触发器
-        let rows = client.query(
-            "SELECT t.tgname, c.relname \
+        let rows = client
+            .query(
+                "SELECT t.tgname, c.relname \
              FROM pg_trigger t \
              JOIN pg_class c ON c.oid = t.tgrelid \
              JOIN pg_namespace n ON n.oid = c.relnamespace \
              WHERE n.nspname = 'public' AND NOT t.tgisinternal ORDER BY t.tgname",
-            &[],
-        ).await.map_err(map_pg_query_error)?;
+                &[],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
-        Ok(rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let table: String = row.get(1);
-            TableInfo {
-                name,
-                schema: Some("public".to_string()),
-                row_count: None,
-                engine: None,
-                comment: Some(format!("ON {}", table)),
-            }
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let table: String = row.get(1);
+                TableInfo {
+                    name,
+                    schema: Some("public".to_string()),
+                    row_count: None,
+                    engine: None,
+                    comment: Some(format!("ON {}", table)),
+                }
+            })
+            .collect())
     }
 
-    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+    async fn get_trigger_definition(
+        &self,
+        database: Option<&str>,
+        trigger: &str,
+    ) -> Result<String, DatabaseError> {
         let client = self.client_for(database).await?;
-        let row = client.query_opt(
-            "SELECT pg_get_triggerdef(t.oid) \
+        let row = client
+            .query_opt(
+                "SELECT pg_get_triggerdef(t.oid) \
              FROM pg_trigger t \
              JOIN pg_class c ON c.oid = t.tgrelid \
              JOIN pg_namespace n ON n.oid = c.relnamespace \
              WHERE n.nspname = 'public' AND t.tgname = $1 AND NOT t.tgisinternal LIMIT 1",
-            &[&trigger],
-        ).await.map_err(map_pg_query_error)?;
+                &[&trigger],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
         let def: Option<String> = row.and_then(|r| r.get(0));
         def.ok_or_else(|| DatabaseError::Unknown(format!("触发器 {} 不存在", trigger)))
     }
 
-    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+    async fn get_procedures(
+        &self,
+        database: Option<&str>,
+    ) -> Result<Vec<TableInfo>, DatabaseError> {
         self.get_routines(database, "p").await
     }
 
@@ -354,64 +459,99 @@ impl DatabaseDriver for PgDriver {
         self.get_routines(database, "f").await
     }
 
-    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
+    async fn get_procedure_definition(
+        &self,
+        database: Option<&str>,
+        procedure: &str,
+    ) -> Result<String, DatabaseError> {
         self.get_routine_definition(database, "p", procedure).await
     }
 
-    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
+    async fn get_function_definition(
+        &self,
+        database: Option<&str>,
+        function: &str,
+    ) -> Result<String, DatabaseError> {
         self.get_routine_definition(database, "f", function).await
     }
 
     async fn get_users(&self, database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
-        let rows = client.query(
-            "SELECT rolname, rolsuper FROM pg_roles WHERE rolcanlogin ORDER BY rolname",
-            &[],
-        ).await.map_err(map_pg_query_error)?;
-        Ok(rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let is_super: bool = row.get(1);
-            DbUserInfo {
-                name,
-                host: None,
-                note: if is_super { Some("超级用户".to_string()) } else { None },
-            }
-        }).collect())
+        let rows = client
+            .query(
+                "SELECT rolname, rolsuper FROM pg_roles WHERE rolcanlogin ORDER BY rolname",
+                &[],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let is_super: bool = row.get(1);
+                DbUserInfo {
+                    name,
+                    host: None,
+                    note: if is_super {
+                        Some("超级用户".to_string())
+                    } else {
+                        None
+                    },
+                }
+            })
+            .collect())
     }
 
-    async fn get_current_user(&self, database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+    async fn get_current_user(
+        &self,
+        database: Option<&str>,
+    ) -> Result<CurrentUserInfo, DatabaseError> {
         let client = self.client_for(database).await?;
-        let row = client.query_one("SELECT current_user", &[]).await.map_err(map_pg_query_error)?;
+        let row = client
+            .query_one("SELECT current_user", &[])
+            .await
+            .map_err(map_pg_query_error)?;
         let user: String = row.get(0);
 
         let mut grants: Vec<String> = Vec::new();
         // 角色成员关系
-        let rows = client.query(
-            "SELECT '成员角色: ' || r.rolname FROM pg_auth_members m \
+        let rows = client
+            .query(
+                "SELECT '成员角色: ' || r.rolname FROM pg_auth_members m \
              JOIN pg_roles r ON r.oid = m.roleid \
              WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)",
-            &[],
-        ).await.map_err(map_pg_query_error)?;
+                &[],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
         for r in &rows {
             grants.push(r.get(0));
         }
         // 表级权限
-        let rows = client.query(
-            "SELECT 'GRANT ' || privilege_type || ' ON ' || table_schema || '.' || table_name \
+        let rows = client
+            .query(
+                "SELECT 'GRANT ' || privilege_type || ' ON ' || table_schema || '.' || table_name \
              FROM information_schema.role_table_grants WHERE grantee = current_user \
              ORDER BY table_schema, table_name LIMIT 200",
-            &[],
-        ).await.map_err(map_pg_query_error)?;
+                &[],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
         for r in &rows {
             grants.push(r.get(0));
         }
         Ok(CurrentUserInfo { user, grants })
     }
 
-    async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
+    async fn get_columns(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
-        let rows = client.query(
-            "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, \
+        let rows = client
+            .query(
+                "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, \
              EXISTS ( \
                SELECT 1 FROM information_schema.table_constraints tc \
                JOIN information_schema.key_column_usage kcu \
@@ -429,60 +569,85 @@ impl DatabaseDriver for PgDriver {
              FROM information_schema.columns c \
              WHERE c.table_schema = 'public' AND c.table_name = $1 \
              ORDER BY c.ordinal_position",
-            &[&table],
-        ).await.map_err(map_pg_query_error)?;
+                &[&table],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
-        let columns = rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let data_type: String = row.get(1);
-            let is_nullable: String = row.get(2);
-            let default: Option<String> = row.get(3);
-            let is_pk: bool = row.get(4);
-            let comment: Option<String> = row.get(5);
-            ColumnInfo {
-                name,
-                data_type,
-                nullable: is_nullable == "YES",
-                is_primary_key: is_pk,
-                default_value: default,
-                extra: None,
-                comment,
-            }
-        }).collect();
+        let columns = rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let data_type: String = row.get(1);
+                let is_nullable: String = row.get(2);
+                let default: Option<String> = row.get(3);
+                let is_pk: bool = row.get(4);
+                let comment: Option<String> = row.get(5);
+                ColumnInfo {
+                    name,
+                    data_type,
+                    nullable: is_nullable == "YES",
+                    is_primary_key: is_pk,
+                    default_value: default,
+                    extra: None,
+                    comment,
+                }
+            })
+            .collect();
         Ok(columns)
     }
 
-    async fn get_indexes(&self, database: Option<&str>, table: &str) -> Result<Vec<IndexInfo>, DatabaseError> {
+    async fn get_indexes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<IndexInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
-        let rows = client.query(
-            "SELECT indexname, indexdef FROM pg_indexes \
+        let rows = client
+            .query(
+                "SELECT indexname, indexdef FROM pg_indexes \
              WHERE schemaname = 'public' AND tablename = $1 ORDER BY indexname",
-            &[&table],
-        ).await.map_err(map_pg_query_error)?;
+                &[&table],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
-        let indexes = rows.iter().map(|row| {
-            let name: String = row.get(0);
-            let def: String = row.get(1);
-            // 从 indexdef 的括号里粗解析列名
-            let columns = def
-                .find('(')
-                .and_then(|open| def.rfind(')').map(|close| &def[open + 1..close]))
-                .map(|inner| inner.split(',').map(|c| c.trim().trim_matches('"').to_string()).collect())
-                .unwrap_or_default();
-            IndexInfo {
-                is_primary: name.ends_with("_pkey"),
-                is_unique: def.to_uppercase().contains("UNIQUE"),
-                name,
-                columns,
-            }
-        }).collect();
+        let indexes = rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let def: String = row.get(1);
+                // 从 indexdef 的括号里粗解析列名
+                let columns = def
+                    .find('(')
+                    .and_then(|open| def.rfind(')').map(|close| &def[open + 1..close]))
+                    .map(|inner| {
+                        inner
+                            .split(',')
+                            .map(|c| c.trim().trim_matches('"').to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                IndexInfo {
+                    is_primary: name.ends_with("_pkey"),
+                    is_unique: def.to_uppercase().contains("UNIQUE"),
+                    name,
+                    columns,
+                }
+            })
+            .collect();
         Ok(indexes)
     }
 
-    async fn get_foreign_keys(&self, database: Option<&str>, table: &str) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
+    async fn get_foreign_keys(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
         let client = self.client_for(database).await?;
-        let rows = client.query(
-            "SELECT tc.constraint_name, kcu.column_name, \
+        let rows = client
+            .query(
+                "SELECT tc.constraint_name, kcu.column_name, \
                     ccu.table_schema, ccu.table_name, ccu.column_name, \
                     rc.update_rule, rc.delete_rule \
              FROM information_schema.table_constraints tc \
@@ -499,8 +664,10 @@ impl DatabaseDriver for PgDriver {
              WHERE tc.constraint_type = 'FOREIGN KEY' \
                AND tc.table_schema = 'public' AND tc.table_name = $1 \
              ORDER BY tc.constraint_name, kcu.ordinal_position",
-            &[&table],
-        ).await.map_err(map_pg_query_error)?;
+                &[&table],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
 
         // 按约束名分组（保持列顺序）
         let mut order: Vec<String> = Vec::new();
@@ -527,10 +694,16 @@ impl DatabaseDriver for PgDriver {
         Ok(order.into_iter().filter_map(|n| map.remove(&n)).collect())
     }
 
-    async fn execute_batch(&self, sqls: Vec<String>, database: Option<&str>) -> Result<u64, DatabaseError> {
+    async fn execute_batch(
+        &self,
+        sqls: Vec<String>,
+        database: Option<&str>,
+    ) -> Result<u64, DatabaseError> {
         let client = self.client_for(database).await?;
 
-        client.batch_execute("BEGIN").await
+        client
+            .batch_execute("BEGIN")
+            .await
             .map_err(|e| DatabaseError::ExecuteError(e.to_string()))?;
 
         let mut total: u64 = 0;
@@ -544,7 +717,9 @@ impl DatabaseDriver for PgDriver {
             }
         }
 
-        client.batch_execute("COMMIT").await
+        client
+            .batch_execute("COMMIT")
+            .await
             .map_err(|e| DatabaseError::ExecuteError(e.to_string()))?;
 
         Ok(total)
@@ -556,20 +731,33 @@ impl DatabaseDriver for PgDriver {
         Ok(())
     }
 
-    async fn export_table_csv(&self, database: Option<&str>, table: &str, path: &str) -> Result<u64, DatabaseError> {
+    async fn export_table_csv(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        path: &str,
+    ) -> Result<u64, DatabaseError> {
         let client = self.client_for(database).await?;
 
         // 先 prepare 拿列信息（空表也能拿到表头），再执行
         let stmt = client
-            .prepare(&format!("SELECT * FROM \"{}\"", self.escape_identifier(table)))
+            .prepare(&format!(
+                "SELECT * FROM \"{}\"",
+                self.escape_identifier(table)
+            ))
             .await
             .map_err(map_pg_query_error)?;
-        let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
+        let columns: Vec<String> = stmt
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
         let col_types: Vec<Type> = stmt.columns().iter().map(|c| c.type_().clone()).collect();
 
         // 全量导出，不受 MAX_ROWS 限制
         let rows = client.query(&stmt, &[]).await.map_err(map_pg_query_error)?;
-        let data: Vec<Vec<Option<serde_json::Value>>> = rows.iter()
+        let data: Vec<Vec<Option<serde_json::Value>>> = rows
+            .iter()
             .map(|r| {
                 (0..columns.len())
                     .map(|i| Some(pg_value_to_json(r, i, &col_types[i])))
@@ -580,7 +768,13 @@ impl DatabaseDriver for PgDriver {
         crate::database::write_csv(path, &columns, data)
     }
 
-    async fn dump_table(&self, database: Option<&str>, table: &str, include_drop: bool, include_data: bool) -> Result<(String, u64), DatabaseError> {
+    async fn dump_table(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        include_drop: bool,
+        include_data: bool,
+    ) -> Result<(String, u64), DatabaseError> {
         let client = self.client_for(database).await?;
         let esc = self.escape_identifier(table);
 
@@ -596,24 +790,32 @@ impl DatabaseDriver for PgDriver {
         if cols.is_empty() {
             return Err(DatabaseError::Unknown(format!("表 {} 不存在或无列", table)));
         }
-        let mut defs: Vec<String> = cols.iter().map(|c| {
-            let mut d = format!("\"{}\" {}", self.escape_identifier(&c.name), c.data_type);
-            if let Some(def) = &c.default_value {
-                d.push_str(&format!(" DEFAULT {}", def));
-            }
-            if !c.nullable {
-                d.push_str(" NOT NULL");
-            }
-            d
-        }).collect();
-        let pk: Vec<String> = cols.iter()
+        let mut defs: Vec<String> = cols
+            .iter()
+            .map(|c| {
+                let mut d = format!("\"{}\" {}", self.escape_identifier(&c.name), c.data_type);
+                if let Some(def) = &c.default_value {
+                    d.push_str(&format!(" DEFAULT {}", def));
+                }
+                if !c.nullable {
+                    d.push_str(" NOT NULL");
+                }
+                d
+            })
+            .collect();
+        let pk: Vec<String> = cols
+            .iter()
             .filter(|c| c.is_primary_key)
             .map(|c| format!("\"{}\"", self.escape_identifier(&c.name)))
             .collect();
         if !pk.is_empty() {
             defs.push(format!("PRIMARY KEY ({})", pk.join(", ")));
         }
-        out.push_str(&format!("CREATE TABLE \"{}\" (\n  {}\n);\n\n", esc, defs.join(",\n  ")));
+        out.push_str(&format!(
+            "CREATE TABLE \"{}\" (\n  {}\n);\n\n",
+            esc,
+            defs.join(",\n  ")
+        ));
 
         let mut rows_written = 0u64;
         if include_data {
@@ -621,13 +823,23 @@ impl DatabaseDriver for PgDriver {
                 .prepare(&format!("SELECT * FROM \"{}\"", esc))
                 .await
                 .map_err(map_pg_query_error)?;
-            let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
+            let columns: Vec<String> = stmt
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect();
             let col_types: Vec<Type> = stmt.columns().iter().map(|c| c.type_().clone()).collect();
             let rows = client.query(&stmt, &[]).await.map_err(map_pg_query_error)?;
-            let data: Vec<Vec<Option<serde_json::Value>>> = rows.iter()
-                .map(|r| (0..columns.len()).map(|i| Some(pg_value_to_json(r, i, &col_types[i]))).collect())
+            let data: Vec<Vec<Option<serde_json::Value>>> = rows
+                .iter()
+                .map(|r| {
+                    (0..columns.len())
+                        .map(|i| Some(pg_value_to_json(r, i, &col_types[i])))
+                        .collect()
+                })
                 .collect();
-            let quoted_cols = columns.iter()
+            let quoted_cols = columns
+                .iter()
                 .map(|c| format!("\"{}\"", self.escape_identifier(c)))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -670,20 +882,16 @@ fn pg_value_to_json(row: &tokio_postgres::Row, idx: usize, ty: &Type) -> serde_j
         Type::FLOAT4 => get!(f32),
         Type::FLOAT8 => get!(f64),
         Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN => get!(String),
-        Type::JSON | Type::JSONB => {
-            match row.try_get::<usize, Option<serde_json::Value>>(idx) {
-                Ok(Some(v)) => return J::String(v.to_string()),
-                Ok(None) => return J::Null,
-                Err(_) => {}
-            }
-        }
-        Type::TIMESTAMP => {
-            match row.try_get::<usize, Option<chrono::NaiveDateTime>>(idx) {
-                Ok(Some(v)) => return J::String(v.format("%Y-%m-%d %H:%M:%S").to_string()),
-                Ok(None) => return J::Null,
-                Err(_) => {}
-            }
-        }
+        Type::JSON | Type::JSONB => match row.try_get::<usize, Option<serde_json::Value>>(idx) {
+            Ok(Some(v)) => return J::String(v.to_string()),
+            Ok(None) => return J::Null,
+            Err(_) => {}
+        },
+        Type::TIMESTAMP => match row.try_get::<usize, Option<chrono::NaiveDateTime>>(idx) {
+            Ok(Some(v)) => return J::String(v.format("%Y-%m-%d %H:%M:%S").to_string()),
+            Ok(None) => return J::Null,
+            Err(_) => {}
+        },
         Type::TIMESTAMPTZ => {
             match row.try_get::<usize, Option<chrono::DateTime<chrono::Utc>>>(idx) {
                 Ok(Some(v)) => return J::String(v.format("%Y-%m-%d %H:%M:%S").to_string()),
@@ -691,27 +899,26 @@ fn pg_value_to_json(row: &tokio_postgres::Row, idx: usize, ty: &Type) -> serde_j
                 Err(_) => {}
             }
         }
-        Type::DATE => {
-            match row.try_get::<usize, Option<chrono::NaiveDate>>(idx) {
-                Ok(Some(v)) => return J::String(v.format("%Y-%m-%d").to_string()),
-                Ok(None) => return J::Null,
-                Err(_) => {}
+        Type::DATE => match row.try_get::<usize, Option<chrono::NaiveDate>>(idx) {
+            Ok(Some(v)) => return J::String(v.format("%Y-%m-%d").to_string()),
+            Ok(None) => return J::Null,
+            Err(_) => {}
+        },
+        Type::TIME => match row.try_get::<usize, Option<chrono::NaiveTime>>(idx) {
+            Ok(Some(v)) => return J::String(v.format("%H:%M:%S").to_string()),
+            Ok(None) => return J::Null,
+            Err(_) => {}
+        },
+        Type::BYTEA => match row.try_get::<usize, Option<Vec<u8>>>(idx) {
+            Ok(Some(v)) => {
+                return J::String(format!(
+                    "\\x{}",
+                    v.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+                ))
             }
-        }
-        Type::TIME => {
-            match row.try_get::<usize, Option<chrono::NaiveTime>>(idx) {
-                Ok(Some(v)) => return J::String(v.format("%H:%M:%S").to_string()),
-                Ok(None) => return J::Null,
-                Err(_) => {}
-            }
-        }
-        Type::BYTEA => {
-            match row.try_get::<usize, Option<Vec<u8>>>(idx) {
-                Ok(Some(v)) => return J::String(format!("\\x{}", v.iter().map(|b| format!("{:02x}", b)).collect::<String>())),
-                Ok(None) => return J::Null,
-                Err(_) => {}
-            }
-        }
+            Ok(None) => return J::Null,
+            Err(_) => {}
+        },
         _ => {}
     }
 

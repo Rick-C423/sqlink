@@ -90,8 +90,7 @@ pub fn run() {
                 app.manage(settings_state.clone());
                 tauri::async_runtime::spawn(async move {
                     let settings = settings_state.get();
-                    if let Err(error) =
-                        supervisor.apply(&settings, &settings_state, &manager).await
+                    if let Err(error) = supervisor.apply(&settings, &settings_state, &manager).await
                     {
                         tracing::error!(error = %error, "MCP 服务启动失败");
                     }

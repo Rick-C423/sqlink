@@ -58,7 +58,11 @@ fn parse_conn(driver: &str, url: &str) -> ConnectionConfig {
         port,
         user: user.to_string(),
         password: password.to_string(),
-        database: if database.is_empty() { None } else { Some(database) },
+        database: if database.is_empty() {
+            None
+        } else {
+            Some(database)
+        },
         encrypt: None,
         save_password: None,
         group_name: None,
@@ -99,7 +103,10 @@ async fn exercise(driver: Arc<dyn DatabaseDriver>) {
     let (create, drop, _paging) = dialect(kind);
 
     // 1) 基础查询
-    let r = driver.query("SELECT 1", None, None).await.expect("SELECT 1 失败");
+    let r = driver
+        .query("SELECT 1", None, None)
+        .await
+        .expect("SELECT 1 失败");
     assert_eq!(r.rows.len(), 1, "SELECT 1 应返回一行");
     assert!(!r.columns.is_empty());
 
@@ -150,8 +157,14 @@ async fn exercise(driver: Arc<dyn DatabaseDriver>) {
         "{kind} get_tables 未包含 {TABLE}: {:?}",
         tables.iter().map(|t| &t.name).collect::<Vec<_>>()
     );
-    let columns = driver.get_columns(None, TABLE).await.expect("get_columns 失败");
-    assert!(columns.iter().any(|c| c.name == "name"), "get_columns 缺少 name 列");
+    let columns = driver
+        .get_columns(None, TABLE)
+        .await
+        .expect("get_columns 失败");
+    assert!(
+        columns.iter().any(|c| c.name == "name"),
+        "get_columns 缺少 name 列"
+    );
 
     // 4) 事务批处理：两条 INSERT 成功提交
     let inserted = driver
@@ -191,7 +204,11 @@ async fn exercise(driver: Arc<dyn DatabaseDriver>) {
         .await;
     assert!(result.is_err(), "主键冲突应使批处理失败");
     let count = driver
-        .query(&format!("SELECT COUNT(*) FROM {}", driver.escape_identifier(TABLE)), None, None)
+        .query(
+            &format!("SELECT COUNT(*) FROM {}", driver.escape_identifier(TABLE)),
+            None,
+            None,
+        )
         .await
         .expect("计数失败");
     let count_value = match &count.rows[0].values[0] {

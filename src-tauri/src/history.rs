@@ -2,9 +2,9 @@
 //! 文件: {app_config_dir}/history.jsonl（每行一个 JSON，追加写入）
 //! 容量控制：超过 TRIM_AT 条时重写文件，只保留最近 KEEP 条。
 
+use crate::models::{DatabaseError, HistoryEntry};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use crate::models::{DatabaseError, HistoryEntry};
 
 const KEEP: usize = 500;
 const TRIM_AT: usize = 600;
@@ -35,7 +35,9 @@ impl HistoryStore {
     fn write_all(&self, entries: &[HistoryEntry]) -> Result<(), DatabaseError> {
         let mut out = String::new();
         for e in entries {
-            out.push_str(&serde_json::to_string(e).map_err(|e| DatabaseError::Unknown(e.to_string()))?);
+            out.push_str(
+                &serde_json::to_string(e).map_err(|e| DatabaseError::Unknown(e.to_string()))?,
+            );
             out.push('\n');
         }
         std::fs::write(&self.path, out)
@@ -44,8 +46,8 @@ impl HistoryStore {
 
     /// 追加一条；超量时重写瘦身
     pub fn append(&self, entry: HistoryEntry) -> Result<(), DatabaseError> {
-        let mut line = serde_json::to_string(&entry)
-            .map_err(|e| DatabaseError::Unknown(e.to_string()))?;
+        let mut line =
+            serde_json::to_string(&entry).map_err(|e| DatabaseError::Unknown(e.to_string()))?;
         line.push('\n');
         let mut file = std::fs::OpenOptions::new()
             .create(true)

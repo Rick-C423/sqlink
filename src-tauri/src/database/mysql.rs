@@ -1,13 +1,13 @@
+use crate::database::DatabaseDriver;
+use crate::models::*;
 use async_trait::async_trait;
-use mysql_async::{Opts, OptsBuilder, Pool, prelude::Queryable};
+use mysql_async::{prelude::Queryable, Opts, OptsBuilder, Pool};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
-use crate::database::DatabaseDriver;
-use crate::models::*;
 
 /// 单次查询最多返回的行数（超出部分丢弃并标记 truncated，防止大表拖垮前后端）
 const MAX_ROWS: usize = 10_000;
@@ -48,7 +48,9 @@ impl MySqlDriver {
         let pool = Pool::new(build_opts(config));
 
         // 立即取一条连接验证可用性，失败则报错
-        let conn = pool.get_conn().await
+        let conn = pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
         drop(conn);
 
@@ -60,7 +62,11 @@ impl MySqlDriver {
     }
 
     /// information_schema.ROUTINES 列表（routine_type 为 'PROCEDURE' 或 'FUNCTION'）
-    async fn get_routines(&self, database: Option<&str>, routine_type: &str) -> Result<Vec<TableInfo>, DatabaseError> {
+    async fn get_routines(
+        &self,
+        database: Option<&str>,
+        routine_type: &str,
+    ) -> Result<Vec<TableInfo>, DatabaseError> {
         let sql = match database {
             Some(db) => format!(
                 "SELECT ROUTINE_NAME, ROUTINE_COMMENT FROM information_schema.ROUTINES \
@@ -75,12 +81,18 @@ impl MySqlDriver {
             ),
         };
         let result = self.query(&sql, None, None).await?;
-        Ok(result.rows.iter()
+        Ok(result
+            .rows
+            .iter()
             .filter_map(|row| {
-                let name = row.values.first()
+                let name = row
+                    .values
+                    .first()
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())?;
-                let comment = row.values.get(1)
+                let comment = row
+                    .values
+                    .get(1)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
@@ -97,7 +109,12 @@ impl MySqlDriver {
     }
 
     /// SHOW CREATE PROCEDURE / FUNCTION 取定义（第 3 列是创建语句）
-    async fn get_routine_definition(&self, database: Option<&str>, routine_type: &str, name: &str) -> Result<String, DatabaseError> {
+    async fn get_routine_definition(
+        &self,
+        database: Option<&str>,
+        routine_type: &str,
+        name: &str,
+    ) -> Result<String, DatabaseError> {
         let sql = match database {
             Some(db) => format!(
                 "SHOW CREATE {} `{}`.`{}`",
@@ -113,7 +130,9 @@ impl MySqlDriver {
         };
         let result = self.query(&sql, None, None).await?;
         // SHOW CREATE PROCEDURE 返回: Procedure | sql_mode | Create Procedure | ...
-        result.rows.first()
+        result
+            .rows
+            .first()
             .and_then(|r| r.values.get(2))
             .and_then(|v| v.as_ref())
             .and_then(|v| v.as_str())
@@ -123,13 +142,16 @@ impl MySqlDriver {
 }
 
 pub async fn test_connection(config: &ConnectionConfig) -> Result<(), DatabaseError> {
-    let mut conn = mysql_async::Conn::new(build_opts(config)).await
+    let mut conn = mysql_async::Conn::new(build_opts(config))
+        .await
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
-    conn.query_drop("SELECT 1").await
+    conn.query_drop("SELECT 1")
+        .await
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
-    conn.disconnect().await
+    conn.disconnect()
+        .await
         .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
     Ok(())
@@ -145,15 +167,24 @@ impl DatabaseDriver for MySqlDriver {
         self.connected.load(Ordering::Relaxed)
     }
 
-    async fn query(&self, sql: &str, database: Option<&str>, query_id: Option<u64>) -> Result<QueryResult, DatabaseError> {
+    async fn query(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError> {
         let start = std::time::Instant::now();
 
-        let mut conn = self.pool.get_conn().await
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
         // 切换到查询上下文数据库（池化连接的上次 schema 不可信，每次显式 USE）
         if let Some(db) = database {
-            conn.query_drop(format!("USE `{}`", self.escape_identifier(db))).await
+            conn.query_drop(format!("USE `{}`", self.escape_identifier(db)))
+                .await
                 .map_err(map_query_error)?;
         }
 
@@ -172,19 +203,25 @@ impl DatabaseDriver for MySqlDriver {
             }
         };
 
-        let columns: Vec<ColumnMetadata> = result.columns_ref().iter().map(|col| ColumnMetadata {
-            name: col.name_str().to_string(),
-            data_type: format!("{:?}", col.column_type()),
-            unified_type: "Unknown".to_string(),
-            nullable: !col.flags().contains(mysql_async::consts::ColumnFlags::NOT_NULL_FLAG),
-            length: Some(col.column_length() as usize),
-            precision: None,
-            scale: None,
-        }).collect();
+        let columns: Vec<ColumnMetadata> = result
+            .columns_ref()
+            .iter()
+            .map(|col| ColumnMetadata {
+                name: col.name_str().to_string(),
+                data_type: format!("{:?}", col.column_type()),
+                unified_type: "Unknown".to_string(),
+                nullable: !col
+                    .flags()
+                    .contains(mysql_async::consts::ColumnFlags::NOT_NULL_FLAG),
+                length: Some(col.column_length() as usize),
+                precision: None,
+                scale: None,
+            })
+            .collect();
         let kinds: Vec<ColKind> = result.columns_ref().iter().map(col_kind).collect();
 
-        let result_set: Vec<mysql_async::Row> = result.collect_and_drop().await
-            .map_err(map_query_error)?;
+        let result_set: Vec<mysql_async::Row> =
+            result.collect_and_drop().await.map_err(map_query_error)?;
 
         if let Some(qid) = query_id {
             self.active_queries.lock().await.remove(&qid);
@@ -217,14 +254,23 @@ impl DatabaseDriver for MySqlDriver {
         })
     }
 
-    async fn execute(&self, sql: &str, database: Option<&str>, query_id: Option<u64>) -> Result<QueryResult, DatabaseError> {
+    async fn execute(
+        &self,
+        sql: &str,
+        database: Option<&str>,
+        query_id: Option<u64>,
+    ) -> Result<QueryResult, DatabaseError> {
         let start = std::time::Instant::now();
 
-        let mut conn = self.pool.get_conn().await
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
         if let Some(db) = database {
-            conn.query_drop(format!("USE `{}`", self.escape_identifier(db))).await
+            conn.query_drop(format!("USE `{}`", self.escape_identifier(db)))
+                .await
                 .map_err(map_execute_error)?;
         }
 
@@ -267,9 +313,14 @@ impl DatabaseDriver for MySqlDriver {
         let conn_id = self.active_queries.lock().await.get(&query_id).copied();
         let conn_id = conn_id.ok_or(DatabaseError::Unknown("查询不存在或已结束".to_string()))?;
 
-        let mut killer = self.pool.get_conn().await
+        let mut killer = self
+            .pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
-        killer.query_drop(format!("KILL QUERY {}", conn_id)).await
+        killer
+            .query_drop(format!("KILL QUERY {}", conn_id))
+            .await
             .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
 
         Ok(())
@@ -277,9 +328,12 @@ impl DatabaseDriver for MySqlDriver {
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError> {
         let result = self.query("SHOW DATABASES", None, None).await?;
-        let dbs = result.rows.iter()
+        let dbs = result
+            .rows
+            .iter()
             .filter_map(|row| {
-                row.values.first()
+                row.values
+                    .first()
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str().map(|s| s.to_string()))
             })
@@ -303,19 +357,29 @@ impl DatabaseDriver for MySqlDriver {
         };
 
         let result = self.query(&sql, None, None).await?;
-        let tables = result.rows.iter()
+        let tables = result
+            .rows
+            .iter()
             .filter_map(|row| {
-                let name = row.values.first()
+                let name = row
+                    .values
+                    .first()
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())?;
-                let engine = row.values.get(1)
+                let engine = row
+                    .values
+                    .get(1)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-                let row_count = row.values.get(2)
+                let row_count = row
+                    .values
+                    .get(2)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_i64());
-                let comment = row.values.get(3)
+                let comment = row
+                    .values
+                    .get(3)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
@@ -344,9 +408,13 @@ impl DatabaseDriver for MySqlDriver {
                 .to_string(),
         };
         let result = self.query(&sql, None, None).await?;
-        Ok(result.rows.iter()
+        Ok(result
+            .rows
+            .iter()
             .filter_map(|row| {
-                let name = row.values.first()
+                let name = row
+                    .values
+                    .first()
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())?;
                 Some(TableInfo {
@@ -360,7 +428,11 @@ impl DatabaseDriver for MySqlDriver {
             .collect())
     }
 
-    async fn get_view_definition(&self, database: Option<&str>, view: &str) -> Result<String, DatabaseError> {
+    async fn get_view_definition(
+        &self,
+        database: Option<&str>,
+        view: &str,
+    ) -> Result<String, DatabaseError> {
         let sql = match database {
             Some(db) => format!(
                 "SHOW CREATE VIEW `{}`.`{}`",
@@ -371,7 +443,9 @@ impl DatabaseDriver for MySqlDriver {
         };
         let result = self.query(&sql, None, None).await?;
         // SHOW CREATE VIEW 返回: View | Create View | character_set_client | collation_connection
-        result.rows.first()
+        result
+            .rows
+            .first()
             .and_then(|r| r.values.get(1))
             .and_then(|v| v.as_ref())
             .and_then(|v| v.as_str())
@@ -393,14 +467,33 @@ impl DatabaseDriver for MySqlDriver {
                 .to_string(),
         };
         let result = self.query(&sql, None, None).await?;
-        Ok(result.rows.iter()
+        Ok(result
+            .rows
+            .iter()
             .filter_map(|row| {
-                let name = row.values.first()
+                let name = row
+                    .values
+                    .first()
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())?;
-                let table = row.values.get(1).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).unwrap_or("");
-                let timing = row.values.get(2).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).unwrap_or("");
-                let event = row.values.get(3).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).unwrap_or("");
+                let table = row
+                    .values
+                    .get(1)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let timing = row
+                    .values
+                    .get(2)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let event = row
+                    .values
+                    .get(3)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 Some(TableInfo {
                     name: name.to_string(),
                     schema: database.map(|d| d.to_string()),
@@ -412,7 +505,11 @@ impl DatabaseDriver for MySqlDriver {
             .collect())
     }
 
-    async fn get_trigger_definition(&self, database: Option<&str>, trigger: &str) -> Result<String, DatabaseError> {
+    async fn get_trigger_definition(
+        &self,
+        database: Option<&str>,
+        trigger: &str,
+    ) -> Result<String, DatabaseError> {
         let sql = match database {
             Some(db) => format!(
                 "SHOW CREATE TRIGGER `{}`.`{}`",
@@ -423,7 +520,9 @@ impl DatabaseDriver for MySqlDriver {
         };
         let result = self.query(&sql, None, None).await?;
         // SHOW CREATE TRIGGER 返回: Trigger | sql_mode | SQL Original Statement | ...
-        result.rows.first()
+        result
+            .rows
+            .first()
             .and_then(|r| r.values.get(2))
             .and_then(|v| v.as_ref())
             .and_then(|v| v.as_str())
@@ -431,7 +530,10 @@ impl DatabaseDriver for MySqlDriver {
             .ok_or_else(|| DatabaseError::Unknown(format!("触发器 {} 定义为空", trigger)))
     }
 
-    async fn get_procedures(&self, database: Option<&str>) -> Result<Vec<TableInfo>, DatabaseError> {
+    async fn get_procedures(
+        &self,
+        database: Option<&str>,
+    ) -> Result<Vec<TableInfo>, DatabaseError> {
         self.get_routines(database, "PROCEDURE").await
     }
 
@@ -439,41 +541,85 @@ impl DatabaseDriver for MySqlDriver {
         self.get_routines(database, "FUNCTION").await
     }
 
-    async fn get_procedure_definition(&self, database: Option<&str>, procedure: &str) -> Result<String, DatabaseError> {
-        self.get_routine_definition(database, "PROCEDURE", procedure).await
+    async fn get_procedure_definition(
+        &self,
+        database: Option<&str>,
+        procedure: &str,
+    ) -> Result<String, DatabaseError> {
+        self.get_routine_definition(database, "PROCEDURE", procedure)
+            .await
     }
 
-    async fn get_function_definition(&self, database: Option<&str>, function: &str) -> Result<String, DatabaseError> {
-        self.get_routine_definition(database, "FUNCTION", function).await
+    async fn get_function_definition(
+        &self,
+        database: Option<&str>,
+        function: &str,
+    ) -> Result<String, DatabaseError> {
+        self.get_routine_definition(database, "FUNCTION", function)
+            .await
     }
 
     async fn get_users(&self, _database: Option<&str>) -> Result<Vec<DbUserInfo>, DatabaseError> {
-        let result = self.query("SELECT User, Host FROM mysql.user ORDER BY User, Host", None, None).await?;
-        Ok(result.rows.iter()
+        let result = self
+            .query(
+                "SELECT User, Host FROM mysql.user ORDER BY User, Host",
+                None,
+                None,
+            )
+            .await?;
+        Ok(result
+            .rows
+            .iter()
             .filter_map(|row| {
                 let name = row.values.first()?.as_ref()?.as_str()?.to_string();
-                let host = row.values.get(1).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).map(|s| s.to_string());
-                Some(DbUserInfo { name, host, note: None })
+                let host = row
+                    .values
+                    .get(1)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                Some(DbUserInfo {
+                    name,
+                    host,
+                    note: None,
+                })
             })
             .collect())
     }
 
-    async fn get_current_user(&self, _database: Option<&str>) -> Result<CurrentUserInfo, DatabaseError> {
+    async fn get_current_user(
+        &self,
+        _database: Option<&str>,
+    ) -> Result<CurrentUserInfo, DatabaseError> {
         let user_result = self.query("SELECT CURRENT_USER()", None, None).await?;
-        let user = user_result.rows.first()
+        let user = user_result
+            .rows
+            .first()
             .and_then(|r| r.values.first())
             .and_then(|v| v.as_ref())
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();
         let grants_result = self.query("SHOW GRANTS", None, None).await?;
-        let grants = grants_result.rows.iter()
-            .filter_map(|r| r.values.first().and_then(|v| v.as_ref()).and_then(|v| v.as_str()).map(|s| s.to_string()))
+        let grants = grants_result
+            .rows
+            .iter()
+            .filter_map(|r| {
+                r.values
+                    .first()
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
             .collect();
         Ok(CurrentUserInfo { user, grants })
     }
 
-    async fn get_columns(&self, database: Option<&str>, table: &str) -> Result<Vec<ColumnInfo>, DatabaseError> {
+    async fn get_columns(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError> {
         // 不使用 SHOW FULL COLUMNS：它在部分 MySQL 版本上会等待目标表的元数据锁，
         // 导致结构页一直转圈。information_schema.COLUMNS 能提供这里需要的全部字段，
         // 并且明确限定库和表，避免扫描/返回其他对象的元数据。
@@ -496,32 +642,50 @@ impl DatabaseDriver for MySqlDriver {
         );
         let result = timeout(Duration::from_secs(15), self.query(&sql, None, None))
             .await
-            .map_err(|_| DatabaseError::QueryError("读取列信息超时（可能存在未提交的表结构锁）".to_string()))??;
+            .map_err(|_| {
+                DatabaseError::QueryError("读取列信息超时（可能存在未提交的表结构锁）".to_string())
+            })??;
 
-        let columns = result.rows.iter()
+        let columns = result
+            .rows
+            .iter()
             .filter_map(|row| {
                 if row.values.len() >= 7 {
-                    let name = row.values.get(0)
+                    let name = row
+                        .values
+                        .get(0)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str())?;
-                    let data_type = row.values.get(1)
+                    let data_type = row
+                        .values
+                        .get(1)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str())?;
-                    let nullable = row.values.get(2)
+                    let nullable = row
+                        .values
+                        .get(2)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str())
                         .map(|s| s == "YES")
                         .unwrap_or(true);
-                    let key = row.values.get(3)
+                    let key = row
+                        .values
+                        .get(3)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
-                    let default = row.values.get(4)
+                    let default = row
+                        .values
+                        .get(4)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
-                    let extra = row.values.get(5)
+                    let extra = row
+                        .values
+                        .get(5)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
-                    let comment = row.values.get(6)
+                    let comment = row
+                        .values
+                        .get(6)
                         .and_then(|v| v.as_ref())
                         .and_then(|v| v.as_str());
 
@@ -543,7 +707,11 @@ impl DatabaseDriver for MySqlDriver {
         Ok(columns)
     }
 
-    async fn get_indexes(&self, database: Option<&str>, table: &str) -> Result<Vec<IndexInfo>, DatabaseError> {
+    async fn get_indexes(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<IndexInfo>, DatabaseError> {
         let sql = match database {
             Some(db) => format!(
                 "SHOW INDEX FROM `{}` FROM `{}`",
@@ -559,28 +727,38 @@ impl DatabaseDriver for MySqlDriver {
 
         for row in &result.rows {
             if row.values.len() >= 5 {
-                let index_name = row.values.get(2)
+                let index_name = row
+                    .values
+                    .get(2)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let column_name = row.values.get(4)
+                let column_name = row
+                    .values
+                    .get(4)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let non_unique = row.values.get(1)
+                let non_unique = row
+                    .values
+                    .get(1)
                     .and_then(|v| v.as_ref())
                     .and_then(|v| v.as_i64())
                     .map(|v| v != 0)
                     .unwrap_or(true);
 
-                index_map.entry(index_name.clone()).or_default().push(column_name);
+                index_map
+                    .entry(index_name.clone())
+                    .or_default()
+                    .push(column_name);
                 index_unique.insert(index_name.clone(), !non_unique);
             }
         }
 
-        let indexes = index_map.into_iter()
+        let indexes = index_map
+            .into_iter()
             .map(|(name, columns)| {
                 let is_unique = *index_unique.get(&name).unwrap_or(&false);
                 IndexInfo {
@@ -595,7 +773,11 @@ impl DatabaseDriver for MySqlDriver {
         Ok(indexes)
     }
 
-    async fn get_foreign_keys(&self, database: Option<&str>, table: &str) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
+    async fn get_foreign_keys(
+        &self,
+        database: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
         let esc = |s: &str| s.replace('\\', "\\\\").replace('\'', "\\'");
         let schema_cond = match database {
             Some(db) => format!("k.TABLE_SCHEMA = '{}'", esc(db)),
@@ -621,9 +803,21 @@ impl DatabaseDriver for MySqlDriver {
         let mut order: Vec<String> = Vec::new();
         let mut map: HashMap<String, ForeignKeyInfo> = HashMap::new();
         for row in &result.rows {
-            let get_str = |i: usize| row.values.get(i).and_then(|v| v.as_ref()).and_then(|v| v.as_str()).map(|s| s.to_string());
-            let name = match get_str(0) { Some(n) => n, None => continue };
-            let col = match get_str(1) { Some(c) => c, None => continue };
+            let get_str = |i: usize| {
+                row.values
+                    .get(i)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            };
+            let name = match get_str(0) {
+                Some(n) => n,
+                None => continue,
+            };
+            let col = match get_str(1) {
+                Some(c) => c,
+                None => continue,
+            };
             let entry = map.entry(name.clone()).or_insert_with(|| {
                 order.push(name.clone());
                 ForeignKeyInfo {
@@ -647,17 +841,27 @@ impl DatabaseDriver for MySqlDriver {
     async fn disconnect(&self) -> Result<(), DatabaseError> {
         self.connected.store(false, Ordering::Relaxed);
         let pool = self.pool.clone();
-        pool.disconnect().await
+        pool.disconnect()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
         Ok(())
     }
 
-    async fn export_table_csv(&self, database: Option<&str>, table: &str, path: &str) -> Result<u64, DatabaseError> {
-        let mut conn = self.pool.get_conn().await
+    async fn export_table_csv(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        path: &str,
+    ) -> Result<u64, DatabaseError> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
         if let Some(db) = database {
-            conn.query_drop(format!("USE `{}`", self.escape_identifier(db))).await
+            conn.query_drop(format!("USE `{}`", self.escape_identifier(db)))
+                .await
                 .map_err(map_query_error)?;
         }
 
@@ -666,26 +870,44 @@ impl DatabaseDriver for MySqlDriver {
             .await
             .map_err(map_query_error)?;
 
-        let columns: Vec<String> = result.columns_ref().iter()
+        let columns: Vec<String> = result
+            .columns_ref()
+            .iter()
             .map(|c| c.name_str().to_string())
             .collect();
         let kinds: Vec<ColKind> = result.columns_ref().iter().map(col_kind).collect();
 
         // 全量导出，不受 MAX_ROWS 限制
-        let rows: Vec<mysql_async::Row> = result.collect_and_drop().await.map_err(map_query_error)?;
-        let data: Vec<Vec<Option<serde_json::Value>>> = rows.iter()
-            .map(|r| (0..columns.len()).map(|i| Some(value_to_json(r.get(i), kinds[i]))).collect())
+        let rows: Vec<mysql_async::Row> =
+            result.collect_and_drop().await.map_err(map_query_error)?;
+        let data: Vec<Vec<Option<serde_json::Value>>> = rows
+            .iter()
+            .map(|r| {
+                (0..columns.len())
+                    .map(|i| Some(value_to_json(r.get(i), kinds[i])))
+                    .collect()
+            })
             .collect();
 
         crate::database::write_csv(path, &columns, data)
     }
 
-    async fn dump_table(&self, database: Option<&str>, table: &str, include_drop: bool, include_data: bool) -> Result<(String, u64), DatabaseError> {
-        let mut conn = self.pool.get_conn().await
+    async fn dump_table(
+        &self,
+        database: Option<&str>,
+        table: &str,
+        include_drop: bool,
+        include_data: bool,
+    ) -> Result<(String, u64), DatabaseError> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
         if let Some(db) = database {
-            conn.query_drop(format!("USE `{}`", self.escape_identifier(db))).await
+            conn.query_drop(format!("USE `{}`", self.escape_identifier(db)))
+                .await
                 .map_err(map_query_error)?;
         }
 
@@ -704,7 +926,10 @@ impl DatabaseDriver for MySqlDriver {
             .map_err(map_query_error)?;
         let row = row.ok_or(DatabaseError::Unknown(format!("表 {} 不存在", table)))?;
         let ddl: Option<String> = row.get(1);
-        let ddl = ddl.ok_or(DatabaseError::Unknown(format!("无法获取表 {} 的定义", table)))?;
+        let ddl = ddl.ok_or(DatabaseError::Unknown(format!(
+            "无法获取表 {} 的定义",
+            table
+        )))?;
         out.push_str(&ddl);
         out.push_str(";\n\n");
 
@@ -714,15 +939,24 @@ impl DatabaseDriver for MySqlDriver {
                 .query_iter(format!("SELECT * FROM `{}`", esc))
                 .await
                 .map_err(map_query_error)?;
-            let columns: Vec<String> = result.columns_ref().iter()
+            let columns: Vec<String> = result
+                .columns_ref()
+                .iter()
                 .map(|c| c.name_str().to_string())
                 .collect();
             let kinds: Vec<ColKind> = result.columns_ref().iter().map(col_kind).collect();
-            let rows: Vec<mysql_async::Row> = result.collect_and_drop().await.map_err(map_query_error)?;
-            let data: Vec<Vec<Option<serde_json::Value>>> = rows.iter()
-                .map(|r| (0..columns.len()).map(|i| Some(value_to_json(r.get(i), kinds[i]))).collect())
+            let rows: Vec<mysql_async::Row> =
+                result.collect_and_drop().await.map_err(map_query_error)?;
+            let data: Vec<Vec<Option<serde_json::Value>>> = rows
+                .iter()
+                .map(|r| {
+                    (0..columns.len())
+                        .map(|i| Some(value_to_json(r.get(i), kinds[i])))
+                        .collect()
+                })
                 .collect();
-            let quoted_cols = columns.iter()
+            let quoted_cols = columns
+                .iter()
                 .map(|c| format!("`{}`", self.escape_identifier(c)))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -738,16 +972,25 @@ impl DatabaseDriver for MySqlDriver {
         Ok((out, rows_written))
     }
 
-    async fn execute_batch(&self, sqls: Vec<String>, database: Option<&str>) -> Result<u64, DatabaseError> {
-        let mut conn = self.pool.get_conn().await
+    async fn execute_batch(
+        &self,
+        sqls: Vec<String>,
+        database: Option<&str>,
+    ) -> Result<u64, DatabaseError> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
             .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
 
         if let Some(db) = database {
-            conn.query_drop(format!("USE `{}`", self.escape_identifier(db))).await
+            conn.query_drop(format!("USE `{}`", self.escape_identifier(db)))
+                .await
                 .map_err(map_execute_error)?;
         }
 
-        conn.query_drop("START TRANSACTION").await
+        conn.query_drop("START TRANSACTION")
+            .await
             .map_err(map_execute_error)?;
 
         let mut total: u64 = 0;
@@ -769,8 +1012,7 @@ impl DatabaseDriver for MySqlDriver {
             }
         }
 
-        conn.query_drop("COMMIT").await
-            .map_err(map_execute_error)?;
+        conn.query_drop("COMMIT").await.map_err(map_execute_error)?;
 
         Ok(total)
     }
@@ -804,7 +1046,7 @@ fn col_kind(col: &mysql_async::Column) -> ColKind {
         | T::MYSQL_TYPE_MEDIUM_BLOB
         | T::MYSQL_TYPE_LONG_BLOB => {
             match col.character_set() {
-                63 => ColKind::Binary,          // binary collation
+                63 => ColKind::Binary,               // binary collation
                 28 | 87 | 248 | 249 => ColKind::Gbk, // gbk / gb18030
                 _ => ColKind::Text,
             }

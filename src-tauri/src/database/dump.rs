@@ -161,7 +161,9 @@ fn skip_ws_comments(sql: &str, mut i: usize) -> Option<usize> {
         while i < b.len() && b[i].is_ascii_whitespace() {
             i += 1;
         }
-        if i + 1 < b.len() && b[i] == b'-' && b[i + 1] == b'-'
+        if i + 1 < b.len()
+            && b[i] == b'-'
+            && b[i + 1] == b'-'
             && (i + 2 >= b.len() || b[i + 2].is_ascii_whitespace())
         {
             while i < b.len() && b[i] != b'\n' {
@@ -283,7 +285,10 @@ pub fn normalize_table_name(token: &str) -> String {
     } else {
         last
     };
-    unquoted.replace("``", "`").replace("\"\"", "\"").to_lowercase()
+    unquoted
+        .replace("``", "`")
+        .replace("\"\"", "\"")
+        .to_lowercase()
 }
 
 // ---------- 转储（导出）辅助 ----------
@@ -318,7 +323,10 @@ pub fn write_insert_batches(
 ) -> u64 {
     const BATCH: usize = 100;
     for chunk in rows.chunks(BATCH) {
-        out.push_str(&format!("INSERT INTO {} ({}) VALUES\n", quoted_table, quoted_columns));
+        out.push_str(&format!(
+            "INSERT INTO {} ({}) VALUES\n",
+            quoted_table, quoted_columns
+        ));
         for (i, row) in chunk.iter().enumerate() {
             let vals: Vec<String> = row.iter().map(|v| sql_literal(v, mysql_mode)).collect();
             out.push('(');
@@ -347,7 +355,10 @@ mod tests {
 
     #[test]
     fn basic_multi_statement() {
-        let v = split_all("CREATE TABLE a (id INT);\nINSERT INTO a VALUES (1);\n", true);
+        let v = split_all(
+            "CREATE TABLE a (id INT);\nINSERT INTO a VALUES (1);\n",
+            true,
+        );
         assert_eq!(v.len(), 2);
         assert!(v[0].starts_with("CREATE TABLE a"));
         assert!(v[1].starts_with("INSERT INTO a"));
@@ -399,7 +410,10 @@ mod tests {
 
     #[test]
     fn unicode_content() {
-        let v = split_all("INSERT INTO t VALUES ('中文;内容');\nSELECT '日本語';", true);
+        let v = split_all(
+            "INSERT INTO t VALUES ('中文;内容');\nSELECT '日本語';",
+            true,
+        );
         assert_eq!(v.len(), 2);
         assert!(v[0].contains("中文;内容"));
         assert!(v[1].contains("日本語"));
@@ -412,7 +426,8 @@ mod tests {
         assert!(!ine);
 
         let (name, _, ine) =
-            parse_create_table("-- c\nCREATE TABLE IF NOT EXISTS \"public\".\"t\" (id int);").unwrap();
+            parse_create_table("-- c\nCREATE TABLE IF NOT EXISTS \"public\".\"t\" (id int);")
+                .unwrap();
         assert_eq!(name, "\"public\".\"t\"");
         assert!(ine);
 
@@ -427,4 +442,3 @@ mod tests {
         assert_eq!(normalize_table_name("plain_name"), "plain_name");
     }
 }
-

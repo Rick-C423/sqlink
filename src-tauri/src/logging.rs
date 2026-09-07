@@ -54,7 +54,9 @@ pub fn init(log_dir: &Path) -> Option<LogGuard> {
 /// 清理 N 天前的滚动日志文件（按文件修改时间判断）
 fn cleanup_old_logs(log_dir: &Path) {
     let cutoff = SystemTime::now() - Duration::from_secs(RETENTION_DAYS * 24 * 3600);
-    let Ok(entries) = std::fs::read_dir(log_dir) else { return };
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();

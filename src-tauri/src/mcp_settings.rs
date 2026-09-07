@@ -2,7 +2,10 @@
 //! 文件: {app_config_dir}/mcp-settings.json
 //! 连接级访问控制不在本文件：存于 connections.json 每个连接的 mcpAllowed 字段。
 
-use std::{path::PathBuf, sync::{Arc, RwLock}};
+use std::{
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -57,8 +60,11 @@ impl McpSettings {
         }
         let path = Self::path(config_dir);
         std::fs::create_dir_all(config_dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
-        std::fs::write(&path, serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("写入 MCP 设置失败: {e}"))
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("写入 MCP 设置失败: {e}"))
     }
 }
 
@@ -105,7 +111,8 @@ mod tests {
 
     #[test]
     fn settings_roundtrip_and_defaults() {
-        let dir = std::env::temp_dir().join(format!("sqlink-mcp-settings-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("sqlink-mcp-settings-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // 文件缺失 → 默认值
@@ -124,7 +131,10 @@ mod tests {
         let loaded = McpSettings::load(&dir);
         assert!(!loaded.enabled);
         assert_eq!(loaded.port, 48999);
-        assert_eq!(loaded.disabled_tools, vec!["execute_readonly_sql".to_string()]);
+        assert_eq!(
+            loaded.disabled_tools,
+            vec!["execute_readonly_sql".to_string()]
+        );
 
         // 损坏文件 → 回退默认值
         std::fs::write(dir.join("mcp-settings.json"), "not json").unwrap();
@@ -135,9 +145,15 @@ mod tests {
 
     #[test]
     fn save_rejects_zero_port() {
-        let dir = std::env::temp_dir().join(format!("sqlink-mcp-settings-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("sqlink-mcp-settings-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let err = McpSettings { enabled: true, port: 0, disabled_tools: vec![] }.save(&dir);
+        let err = McpSettings {
+            enabled: true,
+            port: 0,
+            disabled_tools: vec![],
+        }
+        .save(&dir);
         assert!(err.is_err());
         std::fs::remove_dir_all(&dir).ok();
     }

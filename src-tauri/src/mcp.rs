@@ -2,7 +2,11 @@
 //!
 //! 服务只监听 127.0.0.1，使用每次启动随机生成的 Bearer Token，且仅暴露只读工具。
 
-use std::{net::SocketAddr, sync::{Arc, Mutex}, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use axum::{
     extract::{Request, State},
@@ -119,7 +123,10 @@ impl SqlinkMcp {
     /// 连接白名单：仅已保存且未被关闭 MCP 访问的连接可用（mcpAllowed 缺省视为允许）。
     fn connection_allowed(&self, connection_id: &str) -> Result<(), String> {
         let saved = self.manager.list_saved().map_err(|e| e.to_string())?;
-        match saved.iter().find(|c| c.id.as_deref() == Some(connection_id)) {
+        match saved
+            .iter()
+            .find(|c| c.id.as_deref() == Some(connection_id))
+        {
             Some(config) if config.mcp_allowed != Some(false) => Ok(()),
             Some(_) => Err("该连接未允许 MCP 访问：请在 SQLink 的 MCP 设置中开启".into()),
             None => Err("连接不存在或未在 SQLink 中保存".into()),
@@ -400,7 +407,8 @@ impl McpSupervisor {
         if !settings.enabled {
             return Ok(self.status());
         }
-        self.start_service(settings, settings_state, manager).await?;
+        self.start_service(settings, settings_state, manager)
+            .await?;
         Ok(self.status())
     }
 
@@ -451,12 +459,13 @@ impl McpSupervisor {
                     .with_sse_keep_alive(None)
                     .with_cancellation_token(cancellation.child_token()),
             );
-        let app = Router::new()
-            .nest_service("/mcp", service)
-            .layer(middleware::from_fn_with_state(
-                AuthToken(token_value.into()),
-                authorize,
-            ));
+        let app =
+            Router::new()
+                .nest_service("/mcp", service)
+                .layer(middleware::from_fn_with_state(
+                    AuthToken(token_value.into()),
+                    authorize,
+                ));
 
         let serve_token = cancellation.clone();
         let handle = tauri::async_runtime::spawn(async move {
@@ -658,7 +667,7 @@ mod tests {
     const INIT_BODY: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sqlink-test","version":"1.0"}}}"#;
 
     fn accept_headers() -> reqwest::header::HeaderMap {
-        use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+        use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
@@ -726,7 +735,10 @@ mod tests {
 
         assert!(mcp.connection_allowed("allow-default").is_ok());
         assert!(mcp.connection_allowed("allow-true").is_ok());
-        assert!(mcp.connection_allowed("deny").unwrap_err().contains("未允许"));
+        assert!(mcp
+            .connection_allowed("deny")
+            .unwrap_err()
+            .contains("未允许"));
         assert!(mcp.connection_allowed("missing").is_err());
 
         std::fs::remove_dir_all(&dir).ok();
@@ -879,6 +891,9 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert!(call.get("error").is_some(), "disabled tool call should error: {call}");
+        assert!(
+            call.get("error").is_some(),
+            "disabled tool call should error: {call}"
+        );
     }
 }
