@@ -5,19 +5,6 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/**
- * 从 SQL 中提取单表查询的表名（用于数据网格编辑）。
- * 只认"单表 SELECT"：含 JOIN / 子查询 / 多表时返回 null（禁止编辑）。
- */
-export function extractSingleTable(sql: string): string | null {
-  if (/\bjoin\b/i.test(sql)) return null;
-  if (/\b(insert|update|delete|create|drop|alter)\b/i.test(sql)) return null;
-  const fromCount = (sql.match(/\bfrom\b/gi) || []).length;
-  if (fromCount !== 1) return null; // 子查询会有多个 FROM
-  const m = sql.match(/^\s*select[\s\S]+?\bfrom\s+(?:[`"\[]?[\w]+[`"\]]?\.)?[`"\[]?([A-Za-z0-9_]+)[`"\]]?/i);
-  return m ? m[1] : null;
-}
-
 /** JS 值转 SQL 字面量（字符串转义单引号；输入大写 NULL 视为 NULL） */
 export function sqlLiteral(v: string | number | boolean | null | undefined): string {
   if (v === null || v === undefined) return "NULL";

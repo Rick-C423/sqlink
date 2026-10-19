@@ -384,34 +384,73 @@ impl DatabaseDriver for SqliteDriver {
         })
     }
 
+    async fn resolve_table(
+        &self,
+        database: &str,
+        table_parts: &[String],
+    ) -> Result<ResolvedTable, DatabaseError> {
+        let (requested_schema, requested_table) = match table_parts {
+            [table] => (None, table.as_str()),
+            [schema, table] => (Some(schema.as_str()), table.as_str()),
+            _ => {
+                return Err(DatabaseError::QueryError(
+                    "SQLite 表名需要一段或两段标识符".into(),
+                ))
+            }
+        };
+        if table_parts.iter().any(String::is_empty) {
+            return Err(DatabaseError::QueryError("表名各段不能为空".into()));
+        }
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare("PRAGMA database_list").map_err(map_err)?;
+        let attached = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(map_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_err)?;
+        // SQLite 未限定表名时依次查找 temp、main 和按 ATTACH 顺序加入的库。
+        let mut schemas = vec!["temp".to_string(), "main".to_string()];
+        schemas.extend(
+            attached
+                .into_iter()
+                .filter(|name| name != "temp" && name != "main"),
+        );
+        if let Some(requested) = requested_schema {
+            schemas.retain(|name| name.eq_ignore_ascii_case(requested));
+        }
+        for schema in schemas {
+            let sql = format!(
+                "SELECT name FROM \"{}\".sqlite_master WHERE type IN ('table', 'view') AND name = ?1 COLLATE NOCASE",
+                self.escape_identifier(&schema),
+            );
+            let mut identity_stmt = conn.prepare(&sql).map_err(map_err)?;
+            let mut rows = identity_stmt.query([requested_table]).map_err(map_err)?;
+            if let Some(row) = rows.next().map_err(map_err)? {
+                let table: String = row.get(0).map_err(map_err)?;
+                let columns = Self::columns_for_schema(&conn, Some(&schema), &table)?;
+                if columns.is_empty() {
+                    return Err(DatabaseError::QueryError("目标表列信息不可用".into()));
+                }
+                return Ok(ResolvedTable {
+                    database: database.to_string(),
+                    schema: Some(schema),
+                    table,
+                    columns,
+                });
+            }
+        }
+        Err(DatabaseError::QueryError(
+            "未找到目标表或指定的 SQLite schema".into(),
+        ))
+    }
+
     async fn get_columns(
         &self,
         _database: Option<&str>,
         table: &str,
     ) -> Result<Vec<ColumnInfo>, DatabaseError> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(&format!(
-                "PRAGMA table_info(\"{}\")",
-                table.replace('"', "\"\"")
-            ))
-            .map_err(map_err)?;
-        let cols = stmt
-            .query_map([], |r| {
-                Ok(ColumnInfo {
-                    name: r.get(1)?,
-                    data_type: r.get::<_, String>(2).unwrap_or_default(),
-                    nullable: r.get::<_, i64>(3)? == 0,
-                    is_primary_key: r.get::<_, i64>(5)? > 0,
-                    default_value: r.get(4).ok(),
-                    extra: None,
-                    comment: None,
-                })
-            })
-            .map_err(map_err)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(map_err)?;
-        Ok(cols)
+        Self::columns_for_schema(&conn, None, table)
     }
 
     async fn get_indexes(
@@ -632,5 +671,154 @@ impl DatabaseDriver for SqliteDriver {
 
     fn escape_identifier(&self, identifier: &str) -> String {
         identifier.replace('"', "\"\"")
+    }
+}
+
+impl SqliteDriver {
+    fn columns_for_schema(
+        conn: &Connection,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError> {
+        let schema_prefix = schema
+            .map(|name| format!("\"{}\".", name.replace('"', "\"\"")))
+            .unwrap_or_default();
+        let mut stmt = conn
+            .prepare(&format!(
+                "PRAGMA {}table_info(\"{}\")",
+                schema_prefix,
+                table.replace('"', "\"\"")
+            ))
+            .map_err(map_err)?;
+        let cols = stmt
+            .query_map([], |r| {
+                Ok(ColumnInfo {
+                    name: r.get(1)?,
+                    data_type: r.get::<_, String>(2).unwrap_or_default(),
+                    nullable: r.get::<_, i64>(3)? == 0,
+                    is_primary_key: r.get::<_, i64>(5)? > 0,
+                    default_value: r.get(4).ok(),
+                    extra: None,
+                    comment: None,
+                })
+            })
+            .map_err(map_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_err)?;
+        Ok(cols)
+    }
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+
+    fn driver(sql: &str) -> SqliteDriver {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(sql).unwrap();
+        SqliteDriver {
+            conn: Mutex::new(conn),
+            connected: AtomicBool::new(true),
+        }
+    }
+
+    async fn resolve(driver: &SqliteDriver, parts: &[&str]) -> ResolvedTable {
+        driver
+            .resolve_table(
+                "/数据库/当前文件.db",
+                &parts.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn resolves_temp_main_and_attached_in_sqlite_order() {
+        let driver = driver(
+            "ATTACH DATABASE ':memory:' AS first; ATTACH DATABASE ':memory:' AS second;
+            CREATE TABLE main.shared(main_id INTEGER PRIMARY KEY, main_value TEXT);
+            CREATE TEMP TABLE shared(temp_id INTEGER PRIMARY KEY);
+            CREATE TABLE first.shared(first_id INTEGER PRIMARY KEY);
+            CREATE TABLE second.shared(second_id INTEGER PRIMARY KEY);",
+        );
+        let temp = resolve(&driver, &["shared"]).await;
+        assert_eq!(temp.schema.as_deref(), Some("temp"));
+        assert_eq!(temp.columns[0].name, "temp_id");
+        assert!(temp.columns[0].is_primary_key);
+        let main = resolve(&driver, &["MAIN", "SHARED"]).await;
+        assert_eq!(main.database, "/数据库/当前文件.db");
+        assert_eq!(main.schema.as_deref(), Some("main"));
+        assert_eq!(main.table, "shared");
+        assert_eq!(main.columns.len(), 2);
+        assert_eq!(main.columns[0].name, "main_id");
+        assert!(!main.columns[1].is_primary_key);
+        assert_eq!(
+            resolve(&driver, &["first", "shared"]).await.columns[0].name,
+            "first_id"
+        );
+        assert_eq!(
+            resolve(&driver, &["second", "shared"]).await.columns[0].name,
+            "second_id"
+        );
+        driver
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TABLE temp.shared")
+            .unwrap();
+        assert_eq!(
+            resolve(&driver, &["shared"]).await.schema.as_deref(),
+            Some("main")
+        );
+        driver
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TABLE main.shared")
+            .unwrap();
+        assert_eq!(
+            resolve(&driver, &["shared"]).await.schema.as_deref(),
+            Some("first")
+        );
+    }
+
+    #[tokio::test]
+    async fn preserves_decoded_dots_and_quotes_in_each_identifier() {
+        let driver = driver(
+            r#"ATTACH DATABASE ':memory:' AS "库.一""二";
+            CREATE TABLE "库.一""二"."表.一""二"("键.一""二" INTEGER PRIMARY KEY, value TEXT DEFAULT '值');
+            CREATE TABLE main."main.dot"(id INTEGER PRIMARY KEY);"#,
+        );
+        let table = resolve(&driver, &["库.一\"二", "表.一\"二"]).await;
+        assert_eq!(table.schema.as_deref(), Some("库.一\"二"));
+        assert_eq!(table.table, "表.一\"二");
+        assert_eq!(table.columns[0].name, "键.一\"二");
+        assert!(table.columns[0].is_primary_key);
+        assert_eq!(table.columns[1].default_value.as_deref(), Some("'值'"));
+        assert_eq!(resolve(&driver, &["main.dot"]).await.table, "main.dot");
+        // 已解码的一段标识符不会再次按点号拆分。
+        assert!(driver
+            .resolve_table("context", &["库.一\"二.表.一\"二".into()])
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn resolves_views_and_rejects_missing_or_unsupported_qualifiers() {
+        let driver = driver("CREATE TABLE main.present(id INTEGER PRIMARY KEY); CREATE VIEW readonly_view AS SELECT * FROM present;");
+        let view = resolve(&driver, &["readonly_view"]).await;
+        assert_eq!(view.table, "readonly_view");
+        assert_eq!(view.columns[0].name, "id");
+        assert!(!view.columns[0].is_primary_key);
+        for parts in [
+            vec![],
+            vec![""],
+            vec!["missing"],
+            vec!["missing_schema", "present"],
+            vec!["main", "", "present"],
+            vec!["main\"; DROP TABLE present;--", "present"],
+        ] {
+            let parts = parts.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+            assert!(driver.resolve_table("context", &parts).await.is_err());
+        }
+        assert_eq!(resolve(&driver, &["present"]).await.columns[0].name, "id");
     }
 }

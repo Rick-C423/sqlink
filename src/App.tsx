@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from "react";
-import { ConnectionConfig } from "@/types/database";
+import { ConnectionConfig, QueryTarget } from "@/types/database";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useEditorStore } from "@/stores/editorStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { tauriService } from "@/services/tauriService";
-import { extractSingleTable, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { createQueryActions } from "@/lib/queryActions";
 import { ConnectionTree } from "@/components/connection/ConnectionTree";
 import { DatabaseInfoPanel } from "@/components/connection/DatabaseInfoPanel";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
@@ -27,6 +28,8 @@ import { ContextMenu } from "@/components/ContextMenu";
 import { Resizer } from "@/components/ui/Resizer";
 import { useThemeStore } from "@/stores/themeStore";
 import { useI18nStore, useT } from "@/i18n";
+
+const queryActions = createQueryActions(useEditorStore, tauriService);
 
 export default function App() {
   const t = useT();
@@ -66,11 +69,6 @@ export default function App() {
   const closeWs = useWorkspaceStore((s) => s.close);
   const openQuery = useWorkspaceStore((s) => s.openQuery);
 
-  const setTabResult = useEditorStore((s) => s.setTabResult);
-  const setTabExecuting = useEditorStore((s) => s.setTabExecuting);
-  const setTabQueryId = useEditorStore((s) => s.setTabQueryId);
-  const setTabContext = useEditorStore((s) => s.setTabContext);
-
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
 
@@ -109,104 +107,49 @@ export default function App() {
     return () => window.removeEventListener("contextmenu", suppress);
   }, []);
 
-  const handleExecute = async (sql: string, editorTabId: string) => {
+  const selectedQueryTarget = (): QueryTarget | null => {
     if (!activeConnection || !selectedDatabase) {
       setError(t("app.selectDatabaseFirst"));
-      return;
+      return null;
     }
-    setError(null);
-    const queryId = Date.now();
-    setTabExecuting(editorTabId, true);
-    setTabQueryId(editorTabId, queryId);
+    return {
+      connectionId: activeConnection,
+      database: selectedDatabase,
+      driverType: saved.find((connection) => connection.id === activeConnection)?.driverType ?? "mysql",
+    };
+  };
 
+  const handleExecute = async (sql: string, editorTabId: string) => {
+    const target = selectedQueryTarget();
+    if (!target) return;
+    setError(null);
     try {
-      const result = await tauriService.executeQuery(activeConnection, sql, selectedDatabase, queryId, true);
-      setTabResult(editorTabId, result);
-      // 单表 SELECT 结果集允许编辑：提取表名并拉取主键信息
-      if (!result.error && result.columns.length > 0) {
-        const table = extractSingleTable(sql);
-        if (table) {
-          try {
-            const cols = await tauriService.getColumns(activeConnection, selectedDatabase, table);
-            const driverType =
-              useConnectionStore.getState().saved.find((c) => c.id === activeConnection)
-                ?.driverType ?? "mysql";
-            setTabContext(editorTabId, sql, {
-              connectionId: activeConnection,
-              database: selectedDatabase,
-              table,
-              primaryKeys: cols.filter((c) => c.isPrimaryKey).map((c) => c.name),
-              driverType,
-            });
-          } catch {
-            setTabContext(editorTabId, sql, null); // 拉不到主键信息则只读
-          }
-        } else {
-          setTabContext(editorTabId, sql, null);
-        }
-      } else {
-        setTabContext(editorTabId, sql, null);
-      }
+      await queryActions.execute(editorTabId, sql, target);
     } catch (err) {
-      const errorResult = {
-        columns: [],
-        rows: [],
-        executionTimeMs: 0,
-        error: String(err),
-      };
-      setTabResult(editorTabId, errorResult);
       setError(t("app.executeFailed", { error: String(err) }));
-    } finally {
-      setTabExecuting(editorTabId, false);
     }
   };
 
   const handleCancel = (editorTabId: string) => {
-    const tab = useEditorStore.getState().tabs.find((t) => t.id === editorTabId);
-    if (activeConnection && tab?.queryId !== undefined) {
-      tauriService.cancelQuery(activeConnection, tab.queryId).catch((err) => {
-        setError(t("app.cancelFailed", { error: String(err) }));
-      });
-    }
+    queryActions.cancel(editorTabId).catch((err) => {
+      setError(t("app.cancelFailed", { error: String(err) }));
+    });
   };
 
   /** 数据网格编辑提交：事务执行后重新跑一遍原 SQL 刷新结果 */
-  const handleApplyEdits = async (editorTabId: string, statements: string[]) => {
-    if (!activeConnection || !selectedDatabase) return;
-    await tauriService.executeBatch(activeConnection, selectedDatabase, statements);
-    const tab = useEditorStore.getState().tabs.find((t) => t.id === editorTabId);
-    if (tab?.lastSql) {
-      await handleExecute(tab.lastSql, editorTabId);
-    }
+  const handleApplyEdits = async (editorTabId: string, sourceTaskId: number | undefined, statements: string[]) => {
+    await queryActions.applyEdits(editorTabId, sourceTaskId, statements);
   };
 
   /** 执行全部：整页 SQL 拆成多条语句，批量执行（DDL 脚本用） */
   const handleExecuteAll = async (statements: string[], editorTabId: string) => {
-    if (!activeConnection || !selectedDatabase) {
-      setError(t("app.selectDatabaseFirst"));
-      return;
-    }
+    const target = selectedQueryTarget();
+    if (!target) return;
     setError(null);
-    setTabExecuting(editorTabId, true);
-    const started = Date.now();
     try {
-      const affected = await tauriService.executeBatch(activeConnection, selectedDatabase, statements);
-      setTabResult(editorTabId, {
-        columns: [],
-        rows: [],
-        executionTimeMs: Date.now() - started,
-        rowsAffected: affected,
-      });
+      await queryActions.executeAll(editorTabId, statements, target);
     } catch (err) {
-      setTabResult(editorTabId, {
-        columns: [],
-        rows: [],
-        executionTimeMs: Date.now() - started,
-        error: String(err),
-      });
       setError(t("app.batchFailed", { error: String(err) }));
-    } finally {
-      setTabExecuting(editorTabId, false);
     }
   };
 
@@ -432,6 +375,9 @@ export default function App() {
                 )}
                 {activeWs?.kind === "table" && activeWs.database && activeWs.table && (
                   <TableView
+                    // key 绑定表身份：切表/切页签时强制重建实例，
+                    // 否则筛选、页码等 useState 会跨表残留
+                    key={`${activeWs.connectionId}/${activeWs.database}/${activeWs.table}`}
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     table={activeWs.table}
@@ -441,6 +387,7 @@ export default function App() {
                 )}
                 {activeWs?.kind === "view" && activeWs.database && activeWs.table && (
                   <ViewView
+                    key={`${activeWs.connectionId}/${activeWs.database}/${activeWs.table}`}
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     view={activeWs.table}
@@ -469,6 +416,7 @@ export default function App() {
                 )}
                 {activeWs?.kind === "query" && activeWs.editorTabId && (
                   <QueryPanel
+                    key={activeWs.editorTabId}
                     editorTabId={activeWs.editorTabId}
                     connectionId={activeConnection}
                     onExecute={handleExecute}
@@ -568,7 +516,7 @@ function QueryPanel({
   onExecute: (sql: string, tabId: string) => void;
   onExecuteAll: (statements: string[], tabId: string) => void;
   onCancel: (tabId: string) => void;
-  onApplyEdits: (tabId: string, statements: string[]) => Promise<void>;
+  onApplyEdits: (tabId: string, sourceTaskId: number | undefined, statements: string[]) => Promise<void>;
 }) {
   const t = useT();
   const tab = useEditorStore((s) => s.tabs.find((t) => t.id === editorTabId));
@@ -619,8 +567,8 @@ function QueryPanel({
       <div className="border-t flex-shrink-0" style={{ height: resultHeight }}>
         <DataGrid
           result={tab?.result}
-          editContext={tab?.editContext}
-          onApplyEdits={(statements) => onApplyEdits(editorTabId, statements)}
+          editContext={tab?.isExecuting ? null : tab?.editContext}
+          onApplyEdits={(statements) => onApplyEdits(editorTabId, tab?.resultSource?.taskId, statements)}
         />
       </div>
     </div>

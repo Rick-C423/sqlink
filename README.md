@@ -169,6 +169,16 @@ cargo build --release
 cargo test           # 运行单元测试（SQL 导入拆分器等）
 ```
 
+### 回归测试
+
+```bash
+npm test             # 连接切换、取消/刷新来源、完整表名与网格写语句回归
+npm run build        # TypeScript 类型检查与生产构建
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+前端测试使用 Node 内置测试运行器，无需浏览器或数据库实例。Rust 默认实测 SQLite；其他数据库需要配置 `SQLINK_TEST_MYSQL`、`SQLINK_TEST_POSTGRES`、`SQLINK_TEST_MSSQL`，未配置时相应集成用例会跳过。
+
 ## 项目结构
 
 ```

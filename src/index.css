@@ -63,6 +63,17 @@
     @apply bg-background text-foreground;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
+
+  /* 原生下拉选项显式使用主题底色和文字色，避免深色主题出现白底浅字。 */
+  select option,
+  select optgroup {
+    background-color: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+  }
+
+  select option:disabled {
+    color: hsl(var(--muted-foreground));
+  }
 }
 
 /* 选中/悬停态：浅色=浅蓝，深色=中性灰（显式 .dark 规则，避免依赖 dark: 变体） */

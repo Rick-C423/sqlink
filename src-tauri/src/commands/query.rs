@@ -149,6 +149,23 @@ pub async fn schema_get_tables(
 }
 
 #[tauri::command]
+pub async fn schema_resolve_table(
+    connection_id: String,
+    database: String,
+    table_parts: Vec<String>,
+    manager: State<'_, ConnectionPoolManager>,
+) -> Result<ResolvedTable, String> {
+    let driver = manager
+        .get_connection(&connection_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    driver
+        .resolve_table(&database, &table_parts)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn schema_get_columns(
     connection_id: String,
     database: Option<String>,

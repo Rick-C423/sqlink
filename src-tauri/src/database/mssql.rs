@@ -132,28 +132,32 @@ impl DatabaseDriver for MsSqlDriver {
         let start = std::time::Instant::now();
         let mut client = self.client_for(database).await?;
 
-        let stream = client.simple_query(sql).await.map_err(map_query_err)?;
+        let mut stream = client.simple_query(sql).await.map_err(map_query_err)?;
+
+        // 列元数据从流上取：COLMETADATA 在行数据之前到达，空结果集没有
+        // 任何 Row，从首行取列会拿到空 columns，前端会把空结果的 SELECT
+        // 当成无结果集的 DML 展示（只剩"执行成功/影响行数"占位页）
+        let columns: Vec<ColumnMetadata> = stream
+            .columns()
+            .await
+            .map_err(map_query_err)?
+            .unwrap_or(&[])
+            .iter()
+            .map(|col| ColumnMetadata {
+                name: col.name().to_string(),
+                data_type: format!("{:?}", col.column_type()),
+                unified_type: "Unknown".to_string(),
+                nullable: true,
+                length: None,
+                precision: None,
+                scale: None,
+            })
+            .collect();
+
         let tds_rows = stream.into_first_result().await.map_err(map_query_err)?;
 
-        let mut columns: Vec<ColumnMetadata> = Vec::new();
         let mut rows: Vec<RowData> = Vec::new();
         let mut truncated = false;
-
-        if let Some(first) = tds_rows.first() {
-            columns = first
-                .columns()
-                .iter()
-                .map(|col| ColumnMetadata {
-                    name: col.name().to_string(),
-                    data_type: format!("{:?}", col.column_type()),
-                    unified_type: "Unknown".to_string(),
-                    nullable: true,
-                    length: None,
-                    precision: None,
-                    scale: None,
-                })
-                .collect();
-        }
 
         for row in &tds_rows {
             if rows.len() >= MAX_ROWS {
@@ -525,55 +529,84 @@ impl DatabaseDriver for MsSqlDriver {
         Ok(CurrentUserInfo { user, grants })
     }
 
+    async fn resolve_table(
+        &self,
+        database: &str,
+        table_parts: &[String],
+    ) -> Result<ResolvedTable, DatabaseError> {
+        let (target_database, relation_parts) = match table_parts {
+            [_] | [_, _] => (database, table_parts),
+            [db, _, _] => (db.as_str(), &table_parts[1..]),
+            _ => {
+                return Err(DatabaseError::QueryError(
+                    "SQL Server 表名需要一至三段标识符".into(),
+                ))
+            }
+        };
+        if table_parts.iter().any(String::is_empty) {
+            return Err(DatabaseError::QueryError("表名各段不能为空".into()));
+        }
+        let relation = relation_parts
+            .iter()
+            .map(|part| format!("[{}]", self.escape_identifier(part)))
+            .collect::<Vec<_>>()
+            .join(".");
+        let (database, schema, table) = {
+            let mut client = self.client_for(Some(target_database)).await?;
+            let rows = client
+                .query(
+                    "SELECT DB_NAME(), s.name, t.name FROM sys.objects t \
+                 JOIN sys.schemas s ON s.schema_id = t.schema_id \
+                 WHERE t.object_id = OBJECT_ID(@P1) AND t.type IN ('U', 'V')",
+                    &[&relation],
+                )
+                .await
+                .map_err(map_query_err)?
+                .into_first_result()
+                .await
+                .map_err(map_query_err)?;
+            let row = rows
+                .first()
+                .ok_or_else(|| DatabaseError::QueryError("未找到目标表".into()))?;
+            let database = row
+                .get::<&str, _>(0)
+                .ok_or_else(|| DatabaseError::QueryError("数据库身份不可用".into()))?
+                .to_string();
+            let schema = row
+                .get::<&str, _>(1)
+                .ok_or_else(|| DatabaseError::QueryError("表 schema 不可用".into()))?
+                .to_string();
+            let table = row
+                .get::<&str, _>(2)
+                .ok_or_else(|| DatabaseError::QueryError("表名不可用".into()))?
+                .to_string();
+            (database, schema, table)
+        };
+        // 身份查询完成后释放客户端锁，再读取列，避免递归获取同一锁。
+        let columns = self
+            .columns_for_schema(Some(&database), &schema, &table)
+            .await?;
+        if columns.is_empty() {
+            return Err(DatabaseError::QueryError("目标表列信息不可用".into()));
+        }
+        Ok(ResolvedTable {
+            database,
+            schema: Some(schema),
+            table,
+            columns,
+        })
+    }
+
     async fn get_columns(
         &self,
         database: Option<&str>,
         table: &str,
     ) -> Result<Vec<ColumnInfo>, DatabaseError> {
-        let mut client = self.client_for(database).await?;
-        let stream = client.query(
-            "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT, \
-                    CASE WHEN kcu.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END, \
-                    CAST(ep.value AS NVARCHAR(4000)) \
-             FROM INFORMATION_SCHEMA.COLUMNS c \
-             LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc \
-               ON tc.TABLE_NAME = c.TABLE_NAME AND tc.TABLE_SCHEMA = c.TABLE_SCHEMA \
-              AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' \
-             LEFT JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu \
-               ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME \
-              AND kcu.TABLE_NAME = c.TABLE_NAME AND kcu.TABLE_SCHEMA = c.TABLE_SCHEMA \
-              AND kcu.COLUMN_NAME = c.COLUMN_NAME \
-             LEFT JOIN sys.tables st ON st.name = c.TABLE_NAME \
-             LEFT JOIN sys.columns sc ON sc.object_id = st.object_id AND sc.name = c.COLUMN_NAME \
-             LEFT JOIN sys.extended_properties ep \
-               ON ep.major_id = st.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description' \
-             WHERE c.TABLE_NAME = @P1 \
-             ORDER BY c.ORDINAL_POSITION",
-            &[&table],
-        ).await.map_err(map_query_err)?;
-        let rows = stream.into_first_result().await.map_err(map_query_err)?;
-
-        let columns = rows
-            .iter()
-            .map(|row| {
-                let name: &str = row.get(0).unwrap_or("");
-                let data_type: &str = row.get(1).unwrap_or("");
-                let nullable: &str = row.get(2).unwrap_or("YES");
-                let default: Option<&str> = row.get(3);
-                let is_pk: i32 = row.get(4).unwrap_or(0);
-                let comment: Option<&str> = row.get(5);
-                ColumnInfo {
-                    name: name.to_string(),
-                    data_type: data_type.to_string(),
-                    nullable: nullable == "YES",
-                    is_primary_key: is_pk == 1,
-                    default_value: default.map(|s| s.to_string()),
-                    extra: None,
-                    comment: comment.map(|s| s.to_string()),
-                }
-            })
-            .collect();
-        Ok(columns)
+        // 沿用服务器的实际默认 schema 解析规则，避免混合不同 schema 的同名列。
+        Ok(self
+            .resolve_table(database.unwrap_or(""), &[table.to_string()])
+            .await?
+            .columns)
     }
 
     async fn get_indexes(
@@ -880,4 +913,58 @@ fn mssql_value_to_json(row: &tiberius::Row, idx: usize, ty: &ColumnType) -> serd
         .to_string());
 
     J::String(format!("‹{:?}›", ty))
+}
+
+impl MsSqlDriver {
+    async fn columns_for_schema(
+        &self,
+        database: Option<&str>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError> {
+        let mut client = self.client_for(database).await?;
+        let stream = client.query(
+            "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT, \
+                    CASE WHEN kcu.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END, \
+                    CAST(ep.value AS NVARCHAR(4000)) \
+             FROM INFORMATION_SCHEMA.COLUMNS c \
+             LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc \
+               ON tc.TABLE_NAME = c.TABLE_NAME AND tc.TABLE_SCHEMA = c.TABLE_SCHEMA \
+              AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' \
+             LEFT JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu \
+               ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND kcu.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA \
+              AND kcu.TABLE_NAME = c.TABLE_NAME AND kcu.TABLE_SCHEMA = c.TABLE_SCHEMA \
+              AND kcu.COLUMN_NAME = c.COLUMN_NAME \
+             LEFT JOIN sys.objects st ON st.name = c.TABLE_NAME AND st.schema_id = SCHEMA_ID(c.TABLE_SCHEMA) \
+             LEFT JOIN sys.columns sc ON sc.object_id = st.object_id AND sc.name = c.COLUMN_NAME \
+             LEFT JOIN sys.extended_properties ep \
+               ON ep.major_id = st.object_id AND ep.minor_id = sc.column_id AND ep.name = 'MS_Description' \
+             WHERE c.TABLE_NAME = @P1 AND c.TABLE_SCHEMA = @P2 \
+             ORDER BY c.ORDINAL_POSITION",
+            &[&table, &schema],
+        ).await.map_err(map_query_err)?;
+        let rows = stream.into_first_result().await.map_err(map_query_err)?;
+
+        let columns = rows
+            .iter()
+            .map(|row| {
+                let name: &str = row.get(0).unwrap_or("");
+                let data_type: &str = row.get(1).unwrap_or("");
+                let nullable: &str = row.get(2).unwrap_or("YES");
+                let default: Option<&str> = row.get(3);
+                let is_pk: i32 = row.get(4).unwrap_or(0);
+                let comment: Option<&str> = row.get(5);
+                ColumnInfo {
+                    name: name.to_string(),
+                    data_type: data_type.to_string(),
+                    nullable: nullable == "YES",
+                    is_primary_key: is_pk == 1,
+                    default_value: default.map(|s| s.to_string()),
+                    extra: None,
+                    comment: comment.map(|s| s.to_string()),
+                }
+            })
+            .collect();
+        Ok(columns)
+    }
 }

@@ -79,6 +79,16 @@ pub struct ColumnInfo {
     pub comment: Option<String>,
 }
 
+/// 查询执行上下文中已解析的完整表身份及列信息。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedTable {
+    pub database: String,
+    pub schema: Option<String>,
+    pub table: String,
+    pub columns: Vec<ColumnInfo>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexInfo {

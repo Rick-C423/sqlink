@@ -85,7 +85,8 @@ fn dialect(driver: &str) -> (&'static str, &'static str, &'static str) {
             "DROP TABLE IF EXISTS sqlink_it",
             "LIMIT 1 OFFSET 0",
         ),
-        "mssql" => (
+        // driver_type() 返回 "sqlserver"（连接串里才叫 mssql），两个名字都要匹配
+        "mssql" | "sqlserver" => (
             "CREATE TABLE sqlink_it (id INT PRIMARY KEY, name NVARCHAR(200), note NVARCHAR(MAX))",
             "IF OBJECT_ID(N'sqlink_it', N'U') IS NOT NULL DROP TABLE sqlink_it",
             "OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY",
@@ -166,6 +167,49 @@ async fn exercise(driver: Arc<dyn DatabaseDriver>) {
         columns.iter().any(|c| c.name == "name"),
         "get_columns 缺少 name 列"
     );
+
+    // 完整表身份回归：未限定名与解析后的完整限定名必须指向同一张表。
+    let database = if kind == "sqlite" {
+        "SQLite 测试文件上下文".to_string()
+    } else {
+        let sql = match kind {
+            "mysql" => "SELECT DATABASE()",
+            "postgres" => "SELECT current_database()",
+            _ => "SELECT DB_NAME()",
+        };
+        let context = driver.query(sql, None, None).await.expect("读取当前库失败");
+        context.rows[0].values[0]
+            .as_ref()
+            .and_then(|value| value.as_str())
+            .expect("当前库名必须为字符串")
+            .to_string()
+    };
+    let resolved = driver
+        .resolve_table(&database, &[TABLE.to_string()])
+        .await
+        .expect("未限定表名解析失败");
+    assert_eq!(resolved.database, database);
+    assert_eq!(resolved.table, TABLE);
+    assert!(resolved
+        .columns
+        .iter()
+        .any(|column| column.name == "id" && column.is_primary_key));
+    let mut parts = Vec::new();
+    if kind == "mysql" || kind == "sqlserver" || kind == "mssql" {
+        parts.push(resolved.database.clone());
+    }
+    if let Some(schema) = &resolved.schema {
+        parts.push(schema.clone());
+    }
+    parts.push(resolved.table.clone());
+    let qualified = driver
+        .resolve_table(&database, &parts)
+        .await
+        .expect("完整限定表名解析失败");
+    assert_eq!(qualified.database, resolved.database);
+    assert_eq!(qualified.schema, resolved.schema);
+    assert_eq!(qualified.table, resolved.table);
+    assert_eq!(qualified.columns.len(), resolved.columns.len());
 
     // information_schema 元数据路径的回归：默认值与注释必须原样返回，不得丢失或变形
     if kind == "mysql" {
@@ -258,6 +302,20 @@ async fn exercise(driver: Arc<dyn DatabaseDriver>) {
         dump_sql.to_uppercase().contains("CREATE TABLE"),
         "转储应包含建表语句"
     );
+
+    // 8) 空结果集回归：SELECT 返回 0 行时仍必须带列元数据，
+    //    否则前端把空 SELECT 当成无结果集的 DML，只显示"执行成功"占位页
+    let empty_sql = match kind {
+        "mysql" => "SELECT 1 AS a FROM DUAL WHERE 1 = 0",
+        _ => "SELECT 1 AS a WHERE 1 = 0",
+    };
+    let empty = driver
+        .query(empty_sql, None, None)
+        .await
+        .expect("空结果集查询失败");
+    assert!(empty.rows.is_empty(), "空结果集查询不应返回行");
+    assert_eq!(empty.columns.len(), 1, "空结果集必须保留列元数据");
+    assert_eq!(empty.columns[0].name, "a");
 
     // 清理
     driver.execute(drop, None, None).await.ok();

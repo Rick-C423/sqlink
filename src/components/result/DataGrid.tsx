@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EditContext, QueryResult } from "@/types/database";
-import { cn, quoteIdent, sqlLiteral } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { buildEditStatements } from "@/lib/gridEdits";
 import { Button } from "@/components/ui";
 import { Plus, Check, RotateCcw, Loader2, Pencil, Trash2, Undo2, Copy } from "lucide-react";
 import { useT } from "@/i18n";
+
+/** 排序状态；分页场景由父组件转成 SQL ORDER BY 下推数据库 */
+export interface GridSort {
+  key: string;
+  direction: "asc" | "desc";
+}
 
 interface DataGridProps {
   result: QueryResult | undefined;
   editContext?: EditContext | null;
   /** 提交批量 UPDATE/INSERT（后端事务执行），成功后父组件会刷新结果 */
   onApplyEdits?: (statements: string[]) => Promise<void>;
+  /**
+   * 受控排序：分页数据（表数据浏览）必须由父组件把 ORDER BY 拼进查询，
+   * 内存排序只能作用于当前已拉取的页。传入 onSortChange 后本地排序禁用，
+   * 表头点击回调 onSortChange，排序指示由 sortState 驱动。
+   */
+  sortState?: GridSort | null;
+  onSortChange?: (sort: GridSort) => void;
 }
 
 interface EditingCell {
@@ -22,7 +36,7 @@ interface EditingCell {
 const ROW_HEIGHT = 29;
 const OVERSCAN = 10;
 
-export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
+export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortChange }: DataGridProps) {
   const t = useT();
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   /** 已有行的编辑：key = `${origRowIdx}:${colIdx}`，value = 新文本 */
@@ -61,7 +75,9 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     setScrollTop(0);
   }, [result]);
 
-  // 跟踪可视区尺寸（窗口/面板拖拽都会变化）
+  // 跟踪可视区尺寸（窗口/面板拖拽都会变化）。首次渲染尚无查询结果，
+  // scrollRef 对应的容器还不存在；结果返回后必须重新绑定观察器，否则
+  // viewHeight 会一直为 0，虚拟列表只能渲染 OVERSCAN 指定的 10 行。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -70,7 +86,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [result]);
 
   // 滚动：直接更新（React 批处理），单帧渲染仅 ~40 行，开销可忽略
   const handleGridScroll = useCallback(() => {
@@ -94,11 +110,15 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
   const editable = !!editContext && !!onApplyEdits;
   const hasPrimaryKey = (editContext?.primaryKeys.length ?? 0) > 0;
 
+  /** 当前生效的排序：受控模式用父组件状态，否则用本地状态 */
+  const activeSort = onSortChange ? sortState ?? null : sortConfig;
+
   /** 排序后的行 + 原始下标（编辑/WHERE 定位必须用原始下标） */
   const sortedRows = useMemo(() => {
     if (!result) return [];
     const indexed = result.rows.map((row, origIdx) => ({ row, origIdx }));
-    if (!sortConfig) return indexed;
+    // 受控排序（服务端 ORDER BY）下数据已是全量排序结果，本地不再重排
+    if (onSortChange || !sortConfig) return indexed;
     const colIndex = result.columns.findIndex((c) => c.name === sortConfig.key);
     if (colIndex === -1) return indexed;
 
@@ -115,7 +135,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
       const bStr = String(bVal);
       return sortConfig.direction === "asc" ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
     });
-  }, [result, sortConfig]);
+  }, [result, sortConfig, onSortChange]);
 
   const pendingCount =
     Object.keys(edits).length +
@@ -147,50 +167,7 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
   /** 生成批量 UPDATE / INSERT / DELETE 语句 */
   const buildStatements = (): string[] => {
     if (!result || !editContext) return [];
-    const { table, primaryKeys, driverType } = editContext;
-    const columns = result.columns;
-    const statements: string[] = [];
-    const q = (name: string) => quoteIdent(name, driverType);
-
-    // 主键 WHERE 条件（用原值定位行）
-    const pkWhere = (rowIdx: number) =>
-      primaryKeys
-        .map((pk) => {
-          const pkCol = columns.findIndex((c) => c.name === pk);
-          return `${q(pk)} = ${sqlLiteral(result.rows[rowIdx].values[pkCol])}`;
-        })
-        .join(" AND ");
-
-    // UPDATE：按行分组（已标记删除的行跳过）
-    const byRow = new Map<number, Map<number, string>>();
-    for (const [key, value] of Object.entries(edits)) {
-      const [r, c] = key.split(":").map(Number);
-      if (deletedRows.has(r)) continue;
-      if (!byRow.has(r)) byRow.set(r, new Map());
-      byRow.get(r)!.set(c, value);
-    }
-    for (const [rowIdx, cols] of byRow) {
-      const sets = [...cols.entries()].map(
-        ([c, v]) => `${q(columns[c].name)} = ${sqlLiteral(v)}`
-      );
-      statements.push(`UPDATE ${q(table)} SET ${sets.join(", ")} WHERE ${pkWhere(rowIdx)};`);
-    }
-
-    // DELETE
-    for (const rowIdx of deletedRows) {
-      statements.push(`DELETE FROM ${q(table)} WHERE ${pkWhere(rowIdx)};`);
-    }
-
-    // INSERT：只带有值的列（缺省列走数据库默认值）
-    for (const newRow of newRows) {
-      const entries = Object.entries(newRow);
-      if (entries.length === 0) continue;
-      const colNames = entries.map(([c]) => q(columns[Number(c)].name));
-      const vals = entries.map(([, v]) => sqlLiteral(v));
-      statements.push(`INSERT INTO ${q(table)} (${colNames.join(", ")}) VALUES (${vals.join(", ")});`);
-    }
-
-    return statements;
+    return buildEditStatements(result, editContext, edits, newRows, deletedRows);
   };
 
   const handleSubmit = async () => {
@@ -532,6 +509,17 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                   className="relative overflow-hidden px-3 py-1.5 text-left font-semibold text-xs border-b border-r cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 whitespace-nowrap select-none bg-gray-100 dark:bg-gray-800"
                   style={columnStyle(col.name)}
                   onClick={() => {
+                    if (onSortChange) {
+                      // 分页浏览：排序交给父组件重查（ORDER BY 下推数据库）
+                      onSortChange({
+                        key: col.name,
+                        direction:
+                          activeSort?.key === col.name && activeSort.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      });
+                      return;
+                    }
                     setSortConfig((prev) =>
                       prev?.key === col.name
                         ? { key: col.name, direction: prev.direction === "asc" ? "desc" : "asc" }
@@ -544,8 +532,8 @@ export function DataGrid({ result, editContext, onApplyEdits }: DataGridProps) {
                     {editContext?.primaryKeys.includes(col.name) && (
                       <span className="text-yellow-500" title={t("grid.primaryKey")}>🔑</span>
                     )}
-                    {sortConfig?.key === col.name && (
-                      <span>{sortConfig.direction === "asc" ? "▲" : "▼"}</span>
+                    {activeSort?.key === col.name && (
+                      <span>{activeSort.direction === "asc" ? "▲" : "▼"}</span>
                     )}
                   </div>
                   <div className="text-[10px] text-gray-400 font-normal">{col.dataType}</div>

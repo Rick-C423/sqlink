@@ -615,6 +615,54 @@ impl DatabaseDriver for MySqlDriver {
         Ok(CurrentUserInfo { user, grants })
     }
 
+    async fn resolve_table(
+        &self,
+        database: &str,
+        table_parts: &[String],
+    ) -> Result<ResolvedTable, DatabaseError> {
+        let (target_database, table) = match table_parts {
+            [table] => (database, table.as_str()),
+            [database, table] => (database.as_str(), table.as_str()),
+            _ => {
+                return Err(DatabaseError::QueryError(
+                    "MySQL 表名需要一段或两段标识符".into(),
+                ))
+            }
+        };
+        if target_database.is_empty() || table.is_empty() {
+            return Err(DatabaseError::QueryError("数据库名和表名不能为空".into()));
+        }
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| DatabaseError::ConnectionError(e.to_string()))?;
+        let identities: Vec<(String, String)> = conn.exec(
+            "SELECT TABLE_SCHEMA, TABLE_NAME FROM information_schema.TABLES \
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
+             AND BINARY LOWER(TABLE_SCHEMA) = BINARY LOWER(?) \
+             AND BINARY LOWER(TABLE_NAME) = BINARY LOWER(?) \
+             AND (@@lower_case_table_names <> 0 OR (BINARY TABLE_SCHEMA = BINARY ? AND BINARY TABLE_NAME = BINARY ?)) \
+             LIMIT 2",
+            (target_database, table, target_database, table, target_database, table),
+        ).await.map_err(map_query_error)?;
+        drop(conn);
+        if identities.len() != 1 {
+            return Err(DatabaseError::QueryError("未找到唯一的目标表".into()));
+        }
+        let (database, table) = identities.into_iter().next().unwrap();
+        let columns = self.get_columns(Some(&database), &table).await?;
+        if columns.is_empty() {
+            return Err(DatabaseError::QueryError("目标表列信息不可用".into()));
+        }
+        Ok(ResolvedTable {
+            database,
+            schema: None,
+            table,
+            columns,
+        })
+    }
+
     async fn get_columns(
         &self,
         database: Option<&str>,
@@ -623,31 +671,46 @@ impl DatabaseDriver for MySqlDriver {
         // 不使用 SHOW FULL COLUMNS：它在部分 MySQL 版本上会等待目标表的元数据锁，
         // 导致结构页一直转圈。information_schema.COLUMNS 能提供这里需要的全部字段，
         // 并且明确限定库和表，避免扫描/返回其他对象的元数据。
-        let esc_literal = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
-        let schema = database
-            .map(str::to_owned)
-            .unwrap_or_else(|| "".to_string());
-        let schema_expr = if schema.is_empty() {
-            "DATABASE()".to_string()
-        } else {
-            format!("'{}'", esc_literal(&schema))
-        };
-        let sql = format!(
+        let sql =
             "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT \
              FROM information_schema.COLUMNS \
-             WHERE TABLE_SCHEMA = {} AND TABLE_NAME = '{}' \
-             ORDER BY ORDINAL_POSITION",
-            schema_expr,
-            esc_literal(table)
-        );
-        let result = timeout(Duration::from_secs(15), self.query(&sql, None, None))
-            .await
-            .map_err(|_| {
-                DatabaseError::QueryError("读取列信息超时（可能存在未提交的表结构锁）".to_string())
-            })??;
+             WHERE TABLE_SCHEMA = COALESCE(NULLIF(?, ''), DATABASE()) AND TABLE_NAME = ? \
+             AND BINARY LOWER(TABLE_SCHEMA) = BINARY LOWER(COALESCE(NULLIF(?, ''), DATABASE())) \
+             AND BINARY LOWER(TABLE_NAME) = BINARY LOWER(?) \
+             AND (@@lower_case_table_names <> 0 OR (BINARY TABLE_SCHEMA = BINARY COALESCE(NULLIF(?, ''), DATABASE()) AND BINARY TABLE_NAME = BINARY ?)) \
+             ORDER BY ORDINAL_POSITION";
+        let result_rows = timeout(Duration::from_secs(15), async {
+            let mut conn = self.pool.get_conn().await.map_err(map_query_error)?;
+            let rows: Vec<mysql_async::Row> = conn
+                .exec(
+                    sql,
+                    (
+                        database.unwrap_or(""),
+                        table,
+                        database.unwrap_or(""),
+                        table,
+                        database.unwrap_or(""),
+                        table,
+                    ),
+                )
+                .await
+                .map_err(map_query_error)?;
+            Ok::<_, DatabaseError>(
+                rows.into_iter()
+                    .map(|row| RowData {
+                        values: (0..row.len())
+                            .map(|i| Some(value_to_json(row.get(i), ColKind::Text)))
+                            .collect(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .await
+        .map_err(|_| {
+            DatabaseError::QueryError("读取列信息超时（可能存在未提交的表结构锁）".to_string())
+        })??;
 
-        let columns = result
-            .rows
+        let columns = result_rows
             .iter()
             .filter_map(|row| {
                 if row.values.len() >= 7 {

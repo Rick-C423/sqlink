@@ -109,7 +109,6 @@ impl SqlSplitter {
 
                 // 正常状态：先匹配分隔符
                 if bytes[i..].starts_with(delim) {
-                    out.push_str(&line[..i]);
                     let stmt = out.trim().to_string();
                     self.pending = line[i + delim.len()..].to_string();
                     if stmt.is_empty() {
@@ -354,31 +353,68 @@ mod tests {
     }
 
     #[test]
+    fn single_statement() {
+        assert_eq!(split_all("SELECT 1;", true), vec!["SELECT 1"]);
+    }
+
+    #[test]
     fn basic_multi_statement() {
         let v = split_all(
             "CREATE TABLE a (id INT);\nINSERT INTO a VALUES (1);\n",
             true,
         );
-        assert_eq!(v.len(), 2);
-        assert!(v[0].starts_with("CREATE TABLE a"));
-        assert!(v[1].starts_with("INSERT INTO a"));
+        assert_eq!(
+            v,
+            vec!["CREATE TABLE a (id INT)", "INSERT INTO a VALUES (1)"]
+        );
+    }
+
+    #[test]
+    fn multiline_statement() {
+        assert_eq!(
+            split_all(
+                "CREATE TABLE a (\n  id INT,\n  name TEXT\n);\nSELECT\n  1;",
+                true
+            ),
+            vec!["CREATE TABLE a (\n  id INT,\n  name TEXT\n)", "SELECT\n  1"]
+        );
     }
 
     #[test]
     fn semicolon_inside_string() {
         let v = split_all("INSERT INTO a VALUES ('x;y', \"p;q\");\nSELECT 1;", true);
-        assert_eq!(v.len(), 2);
-        assert!(v[0].contains("'x;y'"));
+        assert_eq!(v, vec!["INSERT INTO a VALUES ('x;y', \"p;q\")", "SELECT 1"]);
+    }
+
+    #[test]
+    fn doubled_quotes_and_quoted_identifier() {
+        let sql = "SELECT 'a'';b', \"c\"\";d\", `e``;f`; SELECT 2;";
+        assert_eq!(
+            split_all(sql, true),
+            vec!["SELECT 'a'';b', \"c\"\";d\", `e``;f`", "SELECT 2"]
+        );
+    }
+
+    #[test]
+    fn multiline_string_and_block_comment() {
+        let sql = "SELECT '第一行;\n第二行';\n/* 注释;\n仍是注释; */ SELECT 2;";
+        assert_eq!(
+            split_all(sql, true),
+            vec![
+                "SELECT '第一行;\n第二行'",
+                "/* 注释;\n仍是注释; */ SELECT 2"
+            ]
+        );
     }
 
     #[test]
     fn backslash_escape_mysql_not_pg() {
         // MySQL: \' 不结束字符串
         let v = split_all("INSERT INTO a VALUES ('a\\'b');\nSELECT 1;", true);
-        assert_eq!(v.len(), 2);
+        assert_eq!(v, vec!["INSERT INTO a VALUES ('a\\'b')", "SELECT 1"]);
         // PG: 反斜杠不是转义，'a\' 就结束字符串（\\' 后引号关闭）
         let v2 = split_all("INSERT INTO a VALUES ('a\\');\nSELECT 1;", false);
-        assert_eq!(v2.len(), 2);
+        assert_eq!(v2, vec!["INSERT INTO a VALUES ('a\\')", "SELECT 1"]);
     }
 
     #[test]
@@ -388,24 +424,33 @@ mod tests {
             true,
         );
         // 语句1 = 行注释+版本化注释；语句2 = # 注释+SELECT 1；语句3 = 末尾残留注释
-        assert_eq!(v.len(), 3);
-        assert!(v[0].contains("SET NAMES"));
-        assert!(v[1].contains("SELECT 1"));
+        assert_eq!(
+            v,
+            vec![
+                "-- comment;\n/*!40101 SET NAMES utf8mb4 */",
+                "# sharp;\nSELECT 1",
+                "-- trailing"
+            ]
+        );
     }
 
     #[test]
     fn delimiter_directive() {
         let sql = "DELIMITER ;;\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END;;\nDELIMITER ;\nSELECT 3;";
         let v = split_all(sql, true);
-        assert_eq!(v.len(), 2);
-        assert!(v[0].contains("CREATE PROCEDURE"));
-        assert!(v[1].contains("SELECT 3"));
+        assert_eq!(
+            v,
+            vec![
+                "CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END",
+                "SELECT 3"
+            ]
+        );
     }
 
     #[test]
     fn multiple_statements_one_line() {
-        let v = split_all("SELECT 1; SELECT 2;  ; SELECT 3;", true);
-        assert_eq!(v.len(), 3);
+        let v = split_all(";; SELECT 1; SELECT 2;  ;; SELECT 3;;;", true);
+        assert_eq!(v, vec!["SELECT 1", "SELECT 2", "SELECT 3"]);
     }
 
     #[test]
@@ -414,9 +459,26 @@ mod tests {
             "INSERT INTO t VALUES ('中文;内容');\nSELECT '日本語';",
             true,
         );
-        assert_eq!(v.len(), 2);
-        assert!(v[0].contains("中文;内容"));
-        assert!(v[1].contains("日本語"));
+        assert_eq!(
+            v,
+            vec!["INSERT INTO t VALUES ('中文;内容')", "SELECT '日本語'"]
+        );
+    }
+
+    #[test]
+    fn final_statement_without_delimiter() {
+        assert_eq!(
+            split_all("SELECT 1;\n SELECT '末尾无分号'  \n", true),
+            vec!["SELECT 1", "SELECT '末尾无分号'"]
+        );
+        assert_eq!(split_all("SELECT\n  1", false), vec!["SELECT\n  1"]);
+    }
+
+    #[test]
+    fn empty_input_and_empty_statements() {
+        assert!(split_all("", true).is_empty());
+        assert!(split_all("  \n \t", true).is_empty());
+        assert!(split_all(";; ;\n;", true).is_empty());
     }
 
     #[test]

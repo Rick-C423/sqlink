@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "node scripts/test.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -24,6 +25,7 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "esbuild": "^0.25.12",
     "@tauri-apps/cli": "^2.2.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",

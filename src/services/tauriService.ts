@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo, McpSettingsSnapshot, McpSettingsInput } from "@/types/database";
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo, McpSettingsSnapshot, McpSettingsInput, ResolvedTable } from "@/types/database";
 
 export const tauriService = {
   // 连接管理
@@ -179,6 +179,11 @@ export const tauriService = {
 
   async getColumns(connectionId: string, database: string | undefined, table: string): Promise<ColumnInfo[]> {
     return await invoke("schema_get_columns", { connectionId, database, table });
+  },
+
+  /** 按数据库实际名称解析规则定位单表，保留完整库名和 schema。 */
+  async resolveTable(connectionId: string, database: string, tableParts: string[]): Promise<ResolvedTable> {
+    return await invoke("schema_resolve_table", { connectionId, database, tableParts });
   },
 
   async getIndexes(connectionId: string, database: string | undefined, table: string): Promise<IndexInfo[]> {

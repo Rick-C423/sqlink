@@ -1,22 +1,24 @@
 import { create } from "zustand";
-import { EditContext, QueryResult } from "@/types/database";
+import { EditContext, QueryExecution, QueryResult } from "@/types/database";
 import { t } from "@/i18n";
 
-interface EditorTab {
+export interface EditorTab {
   id: string;
   title: string;
   content: string;
   result?: QueryResult;
   isExecuting: boolean;
   executionTime?: number;
-  queryId?: number;
+  execution?: Readonly<QueryExecution>;
+  /** 与当前结果一同发布的来源；保存和刷新只能使用此上下文。 */
+  resultSource?: Readonly<QueryExecution>;
   /** 最近一次执行的 SQL（编辑提交后用于刷新） */
   lastSql?: string;
   /** 结果集的编辑上下文（单表查询才有，否则为 null） */
   editContext?: EditContext | null;
 }
 
-interface EditorState {
+export interface EditorState {
   tabs: EditorTab[];
   activeTab: string | null;
 
@@ -24,10 +26,13 @@ interface EditorState {
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTabContent: (id: string, content: string) => void;
-  setTabResult: (id: string, result: QueryResult) => void;
-  setTabExecuting: (id: string, executing: boolean) => void;
-  setTabQueryId: (id: string, queryId: number | undefined) => void;
-  setTabContext: (id: string, lastSql: string, editContext: EditContext | null) => void;
+  beginExecution: (id: string, execution: QueryExecution) => void;
+  completeExecution: (
+    id: string,
+    source: QueryExecution,
+    result: QueryResult,
+    editContext: EditContext | null
+  ) => boolean;
   getActiveTab: () => EditorTab | undefined;
 }
 
@@ -70,33 +75,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
     })),
 
-  setTabResult: (id, result) =>
+  beginExecution: (id, execution) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
-        t.id === id ? { ...t, result, executionTime: result.executionTimeMs, queryId: undefined } : t
+        t.id === id ? { ...t, isExecuting: true, execution: Object.freeze({ ...execution }) } : t
       ),
     })),
 
-  setTabQueryId: (id, queryId) =>
+  completeExecution: (id, source, result, editContext) => {
+    // 已关闭页签或被后续执行替代的请求，不能覆盖较新的结果和编辑上下文。
+    if (get().tabs.find((tab) => tab.id === id)?.execution?.taskId !== source.taskId) {
+      return false;
+    }
     set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === id ? { ...t, queryId } : t
-      ),
-    })),
-
-  setTabContext: (id, lastSql, editContext) =>
-    set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === id ? { ...t, lastSql, editContext } : t
-      ),
-    })),
-
-  setTabExecuting: (id, executing) =>
-    set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === id ? { ...t, isExecuting: executing } : t
-      ),
-    })),
+      tabs: state.tabs.map((tab) => tab.id === id ? {
+        ...tab,
+        result,
+        executionTime: result.executionTimeMs,
+        resultSource: Object.freeze({ ...source }),
+        lastSql: source.sql,
+        editContext,
+        execution: undefined,
+        isExecuting: false,
+      } : tab),
+    }));
+    return true;
+  },
 
   getActiveTab: () => {
     const { tabs, activeTab } = get();

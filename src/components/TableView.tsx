@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ColumnInfo, EditContext, QueryResult } from "@/types/database";
 import { tauriService } from "@/services/tauriService";
 import { quoteIdent, sqlLiteral, commonDataTypes } from "@/lib/utils";
+import { quoteTable, tableParts } from "@/lib/sqlTable";
 import { buildAlterStatements, ColumnDraft, DefaultKind, FkDraft, IndexDraft } from "@/lib/ddl";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { DataGrid } from "@/components/result/DataGrid";
+import { DataGrid, GridSort } from "@/components/result/DataGrid";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { Check, Filter, Loader2, Plus, RefreshCw, RotateCcw, Key, Undo2, X } from "lucide-react";
@@ -75,8 +76,10 @@ const PAGE_SIZE_OPTIONS = [20, 50, 100];
 /**
  * 构造表数据分页 SQL。
  *
- * SQL Server 不使用 2012 才引入的 OFFSET/FETCH，避免旧版本或低兼容级别
- * 数据库报「OFFSET 附近有语法错误」。ROW_NUMBER 从 SQL Server 2005 起可用。
+ * 排序必须下推到数据库（ORDER BY）：网格数据按页拉取，内存排序只能
+ * 作用于当前页。SQL Server 不使用 2012 才引入的 OFFSET/FETCH，避免
+ * 旧版本或低兼容级别数据库报「OFFSET 附近有语法错误」。ROW_NUMBER
+ * 从 SQL Server 2005 起可用。
  */
 function buildPageSql(
   driverType: string,
@@ -84,19 +87,32 @@ function buildPageSql(
   where: string,
   page: number,
   pageSize: number,
-  columns: ColumnInfo[]
+  columns: ColumnInfo[],
+  sort: GridSort | null
 ): string {
   const offset = (page - 1) * pageSize;
   if (driverType !== "sqlserver" && driverType !== "mssql") {
-    return `SELECT * FROM ${table}${where} LIMIT ${pageSize} OFFSET ${offset}`;
+    const orderBy = sort
+      ? ` ORDER BY ${quoteIdent(sort.key, driverType)} ${sort.direction.toUpperCase()}`
+      : "";
+    return `SELECT * FROM ${table}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`;
   }
 
   const rowNumber = quoteIdent("__sqlconnect_row_number", driverType);
   const pageAlias = quoteIdent("__sqlconnect_page", driverType);
   const primaryKeys = columns.filter((column) => column.isPrimaryKey);
-  const orderBy = primaryKeys.length > 0
-    ? primaryKeys.map((column) => quoteIdent(column.name, driverType)).join(", ")
-    : "(SELECT 1)";
+  // 排序列在前，主键做平级断路器让 ROW_NUMBER 稳定（分页不重不漏）；
+  // 无排序时保持原行为
+  const orderByParts: string[] = [];
+  if (sort) {
+    orderByParts.push(`${quoteIdent(sort.key, driverType)} ${sort.direction.toUpperCase()}`);
+  }
+  if (primaryKeys.length > 0) {
+    orderByParts.push(...primaryKeys.map((column) => quoteIdent(column.name, driverType)));
+  } else if (!sort) {
+    orderByParts.push("(SELECT 1)");
+  }
+  const orderBy = orderByParts.join(", ");
   const selectedColumns = columns
     .map((column) => `${pageAlias}.${quoteIdent(column.name, driverType)}`)
     .join(", ");
@@ -173,47 +189,45 @@ export function TableData({ connectionId, database, table, readonly }: TableView
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // 排序下推数据库：只排当前页没有意义，翻页/筛选后仍保持该排序
+  const [sort, setSort] = useState<GridSort | null>(null);
   const [totalRows, setTotalRows] = useState<number | null>(null);
   // 筛选：filters 是草稿，appliedFilters 才进入查询（点"应用"或回车生效）
   const [filters, setFilters] = useState<FilterRow[]>([]);
   const [appliedFilters, setAppliedFilters] = useState<FilterRow[]>([]);
   const [colNames, setColNames] = useState<string[]>([]);
+  const loadSequence = useRef(0);
+  const mounted = useRef(false);
 
   const driverType =
     useConnectionStore.getState().saved.find((c) => c.id === connectionId)?.driverType ??
     "mysql";
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (source?: EditContext) => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
     setError(null);
-    const qt = quoteIdent(table, driverType);
     const where = buildWhere(appliedFilters, driverType);
     // SQL Server 的 COUNT(*) 返回 int，表超过 21 亿行会溢出（错误 8115）；用 COUNT_BIG 返回 bigint
     const countExpr =
       driverType === "sqlserver" || driverType === "mssql" ? "COUNT_BIG(*)" : "COUNT(*)";
-    const countSql = `SELECT ${countExpr} AS cnt FROM ${qt}${where}`;
     try {
-      // SQL Server 的兼容分页需要列名和主键；三个读取任务仍尽量并行执行。
-      const columnsPromise = tauriService.getColumns(connectionId, database, table);
-      const dataPromise =
-        driverType === "sqlserver" || driverType === "mssql"
-          ? columnsPromise.then((columns) =>
-              tauriService.executeQuery(
-                connectionId,
-                buildPageSql(driverType, qt, where, page, pageSize, columns),
-                database
-              )
-            )
-          : tauriService.executeQuery(
-              connectionId,
-              buildPageSql(driverType, qt, where, page, pageSize, []),
-              database
-            );
-      const [countResult, queryResult, cols] = await Promise.all([
+      const metadata = await tauriService.resolveTable(
+        connectionId, source?.database ?? database, source ? tableParts(source) : [table]
+      );
+      if (sequence !== loadSequence.current) return;
+      const qt = quoteTable({ ...metadata, driverType });
+      const cols = metadata.columns;
+      // 使用同一份已解析身份构造分页、统计和保存目标。
+      const countSql = `SELECT ${countExpr} AS cnt FROM ${qt}${where}`;
+      const dataPromise = tauriService.executeQuery(
+        connectionId, buildPageSql(driverType, qt, where, page, pageSize, cols, sort), database
+      );
+      const [countResult, queryResult] = await Promise.all([
         tauriService.executeQuery(connectionId, countSql, database),
         dataPromise,
-        columnsPromise,
       ]);
+      if (sequence !== loadSequence.current) return;
       const total = countResult.rows[0]?.values[0];
       setTotalRows(typeof total === "number" ? total : null);
       setResult(queryResult);
@@ -221,8 +235,9 @@ export function TableData({ connectionId, database, table, readonly }: TableView
       if (!readonly && !queryResult.error && queryResult.columns.length > 0) {
         setEditContext({
           connectionId,
-          database,
-          table,
+          database: metadata.database,
+          schema: metadata.schema,
+          table: metadata.table,
           primaryKeys: cols.filter((c) => c.isPrimaryKey).map((c) => c.name),
           driverType,
         });
@@ -230,14 +245,27 @@ export function TableData({ connectionId, database, table, readonly }: TableView
         setEditContext(null);
       }
     } catch (err) {
-      setError(String(err));
+      if (sequence === loadSequence.current) setError(String(err));
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [connectionId, database, table, page, pageSize, appliedFilters, driverType, readonly]);
+  }, [connectionId, database, table, page, pageSize, sort, appliedFilters, driverType, readonly]);
+  const currentLoad = useRef(load);
+  currentLoad.current = load;
+
+  /** 表头排序：回到第 1 页看排序后的最前数据 */
+  const handleSortChange = useCallback((next: GridSort) => {
+    setSort(next);
+    setPage(1);
+  }, []);
 
   useEffect(() => {
-    load();
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      loadSequence.current++;
+    };
   }, [load]);
 
   /** 应用草稿筛选：回到第 1 页重新查询 */
@@ -251,8 +279,10 @@ export function TableData({ connectionId, database, table, readonly }: TableView
     setFilters((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
 
   const handleApplyEdits = async (statements: string[]) => {
-    await tauriService.executeBatch(connectionId, database, statements);
-    await load();
+    if (!editContext) throw new Error("结果来源不可用，请刷新后重新编辑");
+    const source = editContext;
+    await tauriService.executeBatch(source.connectionId, source.database, statements);
+    if (mounted.current) await currentLoad.current(source);
   };
 
   const totalPages =
@@ -340,11 +370,17 @@ export function TableData({ connectionId, database, table, readonly }: TableView
       </div>
 
       <div className="flex-1 min-h-0">
-        <DataGrid result={result} editContext={editContext} onApplyEdits={handleApplyEdits} />
+        <DataGrid
+          result={result}
+          editContext={editContext}
+          onApplyEdits={handleApplyEdits}
+          sortState={sort}
+          onSortChange={handleSortChange}
+        />
       </div>
       {/* 底部分页栏：刷新固定左下，分页控件右对齐 */}
       <div className="flex items-center gap-2 px-3 py-1 border-t text-xs text-muted-foreground">
-        <Button variant="ghost" size="sm" className="h-6" onClick={load} disabled={loading}>
+        <Button variant="ghost" size="sm" className="h-6" onClick={() => void load()} disabled={loading}>
           {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           <span className="ml-1">{t("common.refresh")}</span>
         </Button>

@@ -89,6 +89,15 @@ pub trait DatabaseDriver: Send + Sync {
         database: Option<&str>,
         table: &str,
     ) -> Result<Vec<ColumnInfo>, DatabaseError>;
+    /// table_parts 是 SQL 解析后逐段解码的标识符，不再按点拆分。
+    async fn resolve_table(
+        &self,
+        database: &str,
+        table_parts: &[String],
+    ) -> Result<ResolvedTable, DatabaseError> {
+        let _ = (database, table_parts);
+        Err(DatabaseError::QueryError("该驱动不支持解析表身份".into()))
+    }
     async fn get_indexes(
         &self,
         database: Option<&str>,

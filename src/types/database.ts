@@ -40,6 +40,30 @@ export interface QueryResult {
   error?: string;
 }
 
+/** 执行开始时固定的连接上下文，不随连接树的选择变化。 */
+export interface QueryTarget {
+  connectionId: string;
+  database: string;
+  driverType: string;
+}
+
+export interface QueryExecution extends QueryTarget {
+  taskId: number;
+  /** 批量脚本暂不支持后端取消，因此没有 queryId。 */
+  queryId?: number;
+  sql: string;
+  /** 单表结果刷新时使用已解析的完整表名。 */
+  refreshSql?: string;
+}
+
+/** 数据库解析的真实对象身份；database 可以与查询的默认库不同。 */
+export interface ResolvedTable {
+  database: string;
+  schema?: string | null;
+  table: string;
+  columns: ColumnInfo[];
+}
+
 /** MCP 设置 + 运行状态快照（mcp_settings_get / mcp_settings_save 返回） */
 export interface McpSettingsSnapshot {
   enabled: boolean;
@@ -150,6 +174,7 @@ export interface TreeNode {
 export interface EditContext {
   connectionId: string;
   database: string;
+  schema?: string | null;
   table: string;
   primaryKeys: string[];
   driverType: string;

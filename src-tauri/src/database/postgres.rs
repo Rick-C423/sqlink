@@ -196,31 +196,31 @@ impl DatabaseDriver for PgDriver {
                 .insert(qid, client.cancel_token());
         }
 
-        let rows_result = client.query(sql, &[]).await;
+        // 列元数据从预编译语句上取：空结果集没有任何 Row，从首行取列
+        // 会拿到空 columns，前端会把空结果的 SELECT 当成 DML 展示
+        let statement = client.prepare(sql).await.map_err(map_pg_query_error)?;
+        let columns: Vec<ColumnMetadata> = statement
+            .columns()
+            .iter()
+            .map(|col| ColumnMetadata {
+                name: col.name().to_string(),
+                data_type: format!("{}", col.type_()),
+                unified_type: "Unknown".to_string(),
+                nullable: true, // information_schema 才有准确值，结果集层面默认为 true
+                length: None,
+                precision: None,
+                scale: None,
+            })
+            .collect();
+
+        let rows_result = client.query(&statement, &[]).await;
         if let Some(qid) = query_id {
             self.cancel_tokens.lock().await.remove(&qid);
         }
         let pg_rows = rows_result.map_err(map_pg_query_error)?;
 
-        let mut columns: Vec<ColumnMetadata> = Vec::new();
         let mut rows: Vec<RowData> = Vec::new();
         let mut truncated = false;
-
-        if let Some(first) = pg_rows.first() {
-            columns = first
-                .columns()
-                .iter()
-                .map(|col| ColumnMetadata {
-                    name: col.name().to_string(),
-                    data_type: format!("{}", col.type_()),
-                    unified_type: "Unknown".to_string(),
-                    nullable: true, // information_schema 才有准确值，结果集层面默认为 true
-                    length: None,
-                    precision: None,
-                    scale: None,
-                })
-                .collect();
-        }
 
         for pg_row in &pg_rows {
             if rows.len() >= MAX_ROWS {
@@ -543,58 +543,68 @@ impl DatabaseDriver for PgDriver {
         Ok(CurrentUserInfo { user, grants })
     }
 
+    async fn resolve_table(
+        &self,
+        database: &str,
+        table_parts: &[String],
+    ) -> Result<ResolvedTable, DatabaseError> {
+        let (requested_database, relation_parts) = match table_parts {
+            [_] | [_, _] => (None, table_parts),
+            [db, _, _] => (Some(db.as_str()), &table_parts[1..]),
+            _ => {
+                return Err(DatabaseError::QueryError(
+                    "PostgreSQL 表名需要一至三段标识符".into(),
+                ))
+            }
+        };
+        if database.is_empty() || table_parts.iter().any(String::is_empty) {
+            return Err(DatabaseError::QueryError(
+                "数据库名和表名各段不能为空".into(),
+            ));
+        }
+        // 每段重新加引号，保留大小写、点号和引号本身；一段名称交由当前 search_path 解析。
+        let relation = relation_parts
+            .iter()
+            .map(|part| format!("\"{}\"", self.escape_identifier(part)))
+            .collect::<Vec<_>>()
+            .join(".");
+        let client = self.client_for(Some(database)).await?;
+        let row = client
+            .query_opt(
+                "SELECT current_database(), n.nspname, c.relname \
+             FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE c.oid = pg_catalog.to_regclass($1) AND c.relkind IN ('r', 'p', 'f', 'v', 'm') \
+             AND ($2::text IS NULL OR $2 = current_database())",
+                &[&relation, &requested_database],
+            )
+            .await
+            .map_err(map_pg_query_error)?
+            .ok_or_else(|| {
+                DatabaseError::QueryError("未找到目标表，或不支持跨数据库限定名".into())
+            })?;
+        let database: String = row.get(0);
+        let schema: String = row.get(1);
+        let table: String = row.get(2);
+        let columns = self
+            .columns_for_schema(Some(&database), &schema, &table)
+            .await?;
+        if columns.is_empty() {
+            return Err(DatabaseError::QueryError("目标表列信息不可用".into()));
+        }
+        Ok(ResolvedTable {
+            database,
+            schema: Some(schema),
+            table,
+            columns,
+        })
+    }
+
     async fn get_columns(
         &self,
         database: Option<&str>,
         table: &str,
     ) -> Result<Vec<ColumnInfo>, DatabaseError> {
-        let client = self.client_for(database).await?;
-        let rows = client
-            .query(
-                "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, \
-             EXISTS ( \
-               SELECT 1 FROM information_schema.table_constraints tc \
-               JOIN information_schema.key_column_usage kcu \
-                 ON tc.constraint_name = kcu.constraint_name \
-                AND tc.table_schema = kcu.table_schema \
-                AND tc.table_name = kcu.table_name \
-               WHERE tc.constraint_type = 'PRIMARY KEY' \
-                 AND kcu.table_schema = c.table_schema \
-                 AND kcu.table_name = c.table_name \
-                 AND kcu.column_name = c.column_name \
-             ) AS is_pk, \
-             pg_catalog.col_description(\
-               format('%I.%I', c.table_schema, c.table_name)::regclass, c.ordinal_position\
-             ) AS comment \
-             FROM information_schema.columns c \
-             WHERE c.table_schema = 'public' AND c.table_name = $1 \
-             ORDER BY c.ordinal_position",
-                &[&table],
-            )
-            .await
-            .map_err(map_pg_query_error)?;
-
-        let columns = rows
-            .iter()
-            .map(|row| {
-                let name: String = row.get(0);
-                let data_type: String = row.get(1);
-                let is_nullable: String = row.get(2);
-                let default: Option<String> = row.get(3);
-                let is_pk: bool = row.get(4);
-                let comment: Option<String> = row.get(5);
-                ColumnInfo {
-                    name,
-                    data_type,
-                    nullable: is_nullable == "YES",
-                    is_primary_key: is_pk,
-                    default_value: default,
-                    extra: None,
-                    comment,
-                }
-            })
-            .collect();
-        Ok(columns)
+        self.columns_for_schema(database, "public", table).await
     }
 
     async fn get_indexes(
@@ -951,4 +961,77 @@ fn is_pg_cancelled(e: &tokio_postgres::Error) -> bool {
     e.as_db_error()
         .map(|d| d.code().code() == "57014")
         .unwrap_or(false)
+}
+
+impl PgDriver {
+    async fn columns_for_schema(
+        &self,
+        database: Option<&str>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnInfo>, DatabaseError> {
+        let client = self.client_for(database).await?;
+        let mut rows = client
+            .query(
+                "SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, \
+             EXISTS ( \
+               SELECT 1 FROM information_schema.table_constraints tc \
+               JOIN information_schema.key_column_usage kcu \
+                 ON tc.constraint_name = kcu.constraint_name \
+                AND tc.table_schema = kcu.table_schema \
+                AND tc.table_name = kcu.table_name \
+               WHERE tc.constraint_type = 'PRIMARY KEY' \
+                 AND kcu.table_schema = c.table_schema \
+                 AND kcu.table_name = c.table_name \
+                 AND kcu.column_name = c.column_name \
+             ) AS is_pk, \
+             pg_catalog.col_description(\
+               format('%I.%I', c.table_schema, c.table_name)::regclass, c.ordinal_position\
+             ) AS comment \
+             FROM information_schema.columns c \
+             WHERE c.table_schema = $2 AND c.table_name = $1 \
+             ORDER BY c.ordinal_position",
+                &[&table, &schema],
+            )
+            .await
+            .map_err(map_pg_query_error)?;
+
+        // information_schema.columns 不列出物化视图，单独从目录读取其列。
+        if rows.is_empty() {
+            rows = client.query(
+                "SELECT a.attname::text, pg_catalog.format_type(a.atttypid, NULL), \
+                 CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END, \
+                 pg_catalog.pg_get_expr(d.adbin, d.adrelid), false, \
+                 pg_catalog.col_description(c.oid, a.attnum) \
+                 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid \
+                 LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum \
+                 WHERE n.nspname = $2 AND c.relname = $1 AND c.relkind = 'm' \
+                 AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum",
+                &[&table, &schema],
+            ).await.map_err(map_pg_query_error)?;
+        }
+
+        let columns = rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get(0);
+                let data_type: String = row.get(1);
+                let is_nullable: String = row.get(2);
+                let default: Option<String> = row.get(3);
+                let is_pk: bool = row.get(4);
+                let comment: Option<String> = row.get(5);
+                ColumnInfo {
+                    name,
+                    data_type,
+                    nullable: is_nullable == "YES",
+                    is_primary_key: is_pk,
+                    default_value: default,
+                    extra: None,
+                    comment,
+                }
+            })
+            .collect();
+        Ok(columns)
+    }
 }
