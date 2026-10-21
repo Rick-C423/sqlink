@@ -1,0 +1,62 @@
+[
+  {
+    "runId": "cfe7d402-30f3-4053-8e7e-6a515a3c92ab",
+    "taskId": "ccfeb858-20ab-4d3b-8fd6-8ebb5c6e8455",
+    "connectionId": "p2-closeout-desktop-postgres",
+    "phase": "cancelled",
+    "summary": {
+      "statements": 3,
+      "executed": 2,
+      "skipped": 0,
+      "cleanupNotice": "executed 仅表示执行成功，不代表已提交。沿用脚本事务；DDL 可能隐式提交，归还会话会清理未闭合事务。已发送 SQL 或结果未知时，只能人工核对，不能按序号续跑或盲目重试。"
+    },
+    "failedStatement": 3,
+    "sentStatements": 3,
+    "commitState": "unknown",
+    "cleanupState": "succeeded",
+    "errorCode": "IMPORT_CANCELLED",
+    "durable": true,
+    "recovery": "manualVerification",
+    "recovered": false
+  },
+  {
+    "runId": "f7087d4b-82ed-459a-bfb3-de73ab157a9e",
+    "taskId": "069529f8-973b-41ba-ab69-ab7cc19db862",
+    "connectionId": "p2-closeout-desktop-sqlite",
+    "phase": "succeeded",
+    "summary": {
+      "statements": 2,
+      "executed": 2,
+      "skipped": 0,
+      "cleanupNotice": "executed 仅表示执行成功，不代表已提交。沿用脚本事务；DDL 可能隐式提交，归还会话会清理未闭合事务。已发送 SQL 或结果未知时，只能人工核对，不能按序号续跑或盲目重试。"
+    },
+    "failedStatement": null,
+    "sentStatements": 2,
+    "commitState": "unknown",
+    "cleanupState": "succeeded",
+    "errorCode": null,
+    "durable": true,
+    "recovery": "manualVerification",
+    "recovered": false
+  },
+  {
+    "runId": "2121f488-d3a5-43c0-9bd1-e49faea221b7",
+    "taskId": "57567a04-96f1-4f29-8ce5-344d402a5abb",
+    "connectionId": "p2-closeout-desktop-mysql",
+    "phase": "succeeded",
+    "summary": {
+      "statements": 2,
+      "executed": 2,
+      "skipped": 0,
+      "cleanupNotice": "executed 仅表示执行成功，不代表已提交。沿用脚本事务；DDL 可能隐式提交，归还会话会清理未闭合事务。已发送 SQL 或结果未知时，只能人工核对，不能按序号续跑或盲目重试。"
+    },
+    "failedStatement": null,
+    "sentStatements": 2,
+    "commitState": "unknown",
+    "cleanupState": "succeeded",
+    "errorCode": null,
+    "durable": true,
+    "recovery": "manualVerification",
+    "recovered": false
+  }
+]

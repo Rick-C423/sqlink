@@ -1,0 +1,164 @@
+{
+  "CapturedUtc": "2026-10-21T00:45:36.1946007Z",
+  "Status": "本地真实桌面自测完成：三库分页、独立统计与取消、精确整数、导入及回执读回通过；默认视口长回执布局复验通过。编辑提交与800×600未验收，用户实际验收仍待完成",
+  "Executable": ".zcode/p2-closeout-desktop-bin/SQLink-P2.exe",
+  "Sha256": "FA85E67982408ADB22DADBAF684C78361857D9B343A5978F180140EAE64004E6",
+  "Identifier": "com.sqlconnect.acceptance.p2.b5bb9322f6284cd0b893d860969eafa4",
+  "UiChecks": [
+    {
+      "Engines": [
+        "SQLite",
+        "MySQL8.4.11",
+        "PostgreSQL17.11"
+      ],
+      "FirstPage": "均实际显示20行与总行数未统计",
+      "Next": "均实际显示21至40且游标续页",
+      "JumpAndLast": "均跳51页显示1001至1003，下一页禁用",
+      "ExplicitCount": "均由手动按钮发起并显示1003行",
+      "ExactIntegers": "均实际显示9007199254740993和9223372036854775807",
+      "BackendCountCallCount": "未通过UI推断后台自动COUNT次数"
+    },
+    {
+      "Engine": "PostgreSQL17.11",
+      "NondefaultSchema": "从目录直接打开p2_desktop.p2_desktop_rows并显示精确整数",
+      "CountCancellation": "合成pages表上30秒独立事务锁；统计pending时原20行仍显示，按钮取消后UI确认TABLE_TASK_CANCELLED；重新统计1003成功",
+      "CancellationRequestedTransient": "取消响应过快，未捕获已请求取消瞬态",
+      "LockHelper": "PID50652已ROLLBACK退出"
+    },
+    {
+      "Editing": "三库可见新增行入口；MySQL双击payload出现编辑器",
+      "WriteCommit": "未执行网格提交；UIA set_value聚焦失败后未输入值，不能算编辑写入通过"
+    }
+  ],
+  "Import": {
+    "Status": "栈修复版真实导入及最终布局版跨重启回执查询均完成",
+    "Preview": "SQLite/MySQL各2句成功；PG4句222字节成功，修复后无新增崩溃",
+    "Execute": "SQLite/MySQL真实执行各2句成功；PG前2句成功，第3句长任务取消，sent3/executed2/failedStatement3",
+    "Receipt": "PG按恢复编号、MySQL按runId跨进程回查，保持cancelled/succeeded状态；本次布局复验未选择文件或重放SQL",
+    "DatabaseReadback": "独立官方客户端/SQLite只读连接回验：MySQL/SQLite各2行含精确大整数，PG仅before-sleep一行",
+    "CommitState": "回执unknown，成功执行与实际DB读回分别记录，不声称通用提交保证",
+    "Evidence": "FixedRetest、LayoutRetest、docs/p2-closeout-desktop-readback.json、docs/p2-closeout-import-receipts.json"
+  },
+  "Incident": {
+    "First": {
+      "PreviewElementIndex": 886,
+      "LocalTime": "2026-10-21 08:17:15+08",
+      "Pid": 55752,
+      "WindowId": 15013578
+    },
+    "Retry": {
+      "PreviewElementIndex": 106,
+      "LocalTime": "2026-10-21 08:20:34+08",
+      "BeforeScreenshot": "postgres-import-before-preview.jpg",
+      "Pid": 52664,
+      "WindowId": 4397720
+    },
+    "Exception": "0xc00000fd",
+    "FaultOffset": "0x145c2a7",
+    "FaultModule": "sqlink-p2.exe",
+    "ToolResult": "no screenshot targets found for process:E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin\\SQLink-P2.exe",
+    "Evidence": "import-preview-windows-events.json",
+    "Cause": "初次故障采集时未定位；最终原因和修复见本条 Resolution 及 FixedRetest、LayoutRetest。",
+    "Sha256": "AB03D3F7C93AF0FE2541D9F433C96DEA3ECAEDCD4B1381BB992119E515EF0AD8",
+    "InitialImport": {
+      "Selection": "通过原生picker键盘输入选择本轮PG合成SQL",
+      "Preview": "两次点击预检文件均退出；未观察到预检结果",
+      "Execute": "未执行",
+      "Receipt": "未执行",
+      "DatabaseReadback": "三库导入表均不存在"
+    },
+    "Resolution": "主代理确认 Windows 1 MiB 栈下大内联 future 导致栈溢出；扫描缓冲直接堆分配并在导入 IPC 边界装箱，命令预检/执行 future 降至152/80字节。新增尺寸及1MiB窄栈实测通过，同一文件真实桌面复验通过，原失败候选已删除。"
+  },
+  "Cleanup": {
+    "CompletedUtc": "2026-10-21T00:46:34.9321537Z",
+    "IsolatedWindowClosed": true,
+    "OwnedProcessesRemaining": 0,
+    "IsolatedKeychainEntryRemoved": true,
+    "ProfileLabTargetAndTemporaryExecutablesRemoved": true,
+    "FreedBytesByFileLength": 6730363259,
+    "EvidencePreserved": true
+  },
+  "EvidenceDirectory": "docs/p2-closeout-desktop-evidence",
+  "Readback": "docs/p2-closeout-desktop-readback.json",
+  "UserAccepted": false,
+  "FixedRetest": {
+    "CapturedUtc": "2026-10-21T00:39:13.6481647Z",
+    "Sha256": "42EA752F0F6CD45826CA2710569739153068278F58EA875B2F15D64562337FD3",
+    "Pid": 36584,
+    "StartedLocal": "2026-10-21 08:30:51+08",
+    "PreviewCrashRetest": "同一PG文件预检4句222字节成功，无新崩溃",
+    "Postgres": {
+      "RecoveryId": "ccfeb858-20ab-4d3b-8fd6-8ebb5c6e8455",
+      "RunId": "cfe7d402-30f3-4053-8e7e-6a515a3c92ab",
+      "PreviewStatements": 4,
+      "FileBytes": 222,
+      "Phase": "cancelled",
+      "Sent": 3,
+      "Executed": 2,
+      "FailedStatement": 3,
+      "CommitState": "unknown",
+      "CleanupState": "succeeded",
+      "FrozenControls": "执行期间选择文件/冲突策略/关闭禁用",
+      "ReceiptUi": "按恢复编号查询返回同一runId与状态，没有重放",
+      "DatabaseReadback": "仅id1/before-sleep；id2/after-sleep不存在"
+    },
+    "SQLite": {
+      "RunId": "f7087d4b-82ed-459a-bfb3-de73ab157a9e",
+      "PreviewStatements": 2,
+      "FileBytes": 179,
+      "Phase": "succeeded",
+      "Sent": 2,
+      "Executed": 2,
+      "CommitState": "unknown",
+      "CleanupState": "succeeded",
+      "DatabaseReadback": "2行，字符串内分号及大整数文本保持"
+    },
+    "MySql": {
+      "RunId": "2121f488-d3a5-43c0-9bd1-e49faea221b7",
+      "PreviewStatements": 2,
+      "FileBytes": 174,
+      "Phase": "succeeded",
+      "Sent": 2,
+      "Executed": 2,
+      "CommitState": "unknown",
+      "CleanupState": "succeeded",
+      "DatabaseReadback": "2行，精确大整数键和文本保持"
+    },
+    "Shutdown": "已通过技能Alt+F4关闭专用窗口，PID36584未见；未删除profile/lab/target"
+  },
+  "LayoutRetest": {
+    "CapturedUtc": "2026-10-21T00:45:36.2016875Z",
+    "Sha256": "FA85E67982408ADB22DADBAF684C78361857D9B343A5978F180140EAE64004E6",
+    "Pid": 28408,
+    "StartedLocal": "2026-10-21 08:41:46+08",
+    "WindowId": 26286386,
+    "OuterWindowWidth": 1402,
+    "OuterWindowHeight": 932,
+    "ContentWidth": 1400,
+    "ContentHeight": 900,
+    "MySqlRunId": "2121f488-d3a5-43c0-9bd1-e49faea221b7",
+    "MySql": "跨重启以runId回查succeeded，正文实际滚动，标题和完成页脚保持可见，点击完成正常关闭对话框",
+    "PostgresRecoveryId": "ccfeb858-20ab-4d3b-8fd6-8ebb5c6e8455",
+    "PostgresRunId": "cfe7d402-30f3-4053-8e7e-6a515a3c92ab",
+    "Postgres": "跨重启以恢复编号回查cancelled，sent3/executed2/failedStatement3保持；正文实际滚动，完成页脚保持可见且点击正常关闭",
+    "Screenshots": [
+      "mysql-receipt-layout-default-top.jpg",
+      "mysql-receipt-layout-default-scrolled.jpg",
+      "mysql-receipt-layout-default-done.jpg",
+      "postgres-receipt-layout-default-top.jpg",
+      "postgres-receipt-layout-default-scrolled.jpg",
+      "postgres-receipt-layout-default-done.jpg"
+    ],
+    "SmallerViewport": "未验证800×600；已读取技能API未提供直接设置窗口尺寸接口，未使用外部UI控制绕过",
+    "NewImportOrReplay": false,
+    "CrashEventsAfterStart": 0,
+    "Shutdown": "技能Alt+F4正常关闭隔离窗口；进程28408及锁helper50652均已退出"
+  },
+  "DeliveredExecutable": {
+    "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\release-staging\\SQLink.exe",
+    "Sha256": "99E04C4EDE1E05944C792C35493C4BC1F4E498C9C375A7FD079E4A73BEC3C19A",
+    "Bytes": 31844864,
+    "Identifier": "正式配置，未使用隔离 identifier",
+    "UserAccepted": false
+  }
+}

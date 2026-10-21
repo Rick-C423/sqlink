@@ -1,0 +1,38 @@
+[
+  {
+    "TimeCreated": "2026-10-21T08:20:37.3860321+08:00",
+    "Id": 1001,
+    "ProviderName": "Windows Error Reporting",
+    "Message": "故障存储段 1748194672543108783，类型 4\r\n事件名称: APPCRASH\r\n响应: 不可用\r\nCab ID: 0\r\n\r\n问题签名:\r\nP1: sqlink-p2.exe\r\nP2: 0.1.3.0\r\nP3: 6ad73d6d\r\nP4: sqlink-p2.exe\r\nP5: 0.1.3.0\r\nP6: 6ad73d6d\r\nP7: c00000fd\r\nP8: 000000000145c2a7\r\nP9: \r\nP10: \r\n\r\n附加文件:\r\n\\\\?\\C:\\ProgramData\\Microsoft\\Windows\\WER\\Temp\\WER.e65c39d9-e0e8-4ea2-9895-c093c7f4003e.tmp.WERInternalMetadata.xml\r\n\r\n可在此处获取这些文件:\r\n\\\\?\\C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_sqlink-p2.exe_7c93425568690c32a406b0fee7dfdadf7b946_65f80358_7c59e7d3-e45f-4428-aa5e-4c304bb5d03e\r\n\r\n分析符号: \r\n重新检查解决方案: 0\r\n报告 ID: 6d0095e0-0a04-4bab-ae6c-10c54a75133f\r\n报告状态: 268435456\r\n哈希存储段: 22614a4ac54499d83842d5cad7298eaf\r\nCab GUID: 0"
+  },
+  {
+    "TimeCreated": "2026-10-21T08:20:36.1832807+08:00",
+    "Id": 1001,
+    "ProviderName": "Windows Error Reporting",
+    "Message": "故障存储段 ，类型 0\r\n事件名称: APPCRASH\r\n响应: 不可用\r\nCab ID: 0\r\n\r\n问题签名:\r\nP1: sqlink-p2.exe\r\nP2: 0.1.3.0\r\nP3: 6ad73d6d\r\nP4: sqlink-p2.exe\r\nP5: 0.1.3.0\r\nP6: 6ad73d6d\r\nP7: c00000fd\r\nP8: 000000000145c2a7\r\nP9: \r\nP10: \r\n\r\n附加文件:\r\n\r\n可在此处获取这些文件:\r\n\\\\?\\C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue\\AppCrash_sqlink-p2.exe_7c93425568690c32a406b0fee7dfdadf7b946_65f80358_7c59e7d3-e45f-4428-aa5e-4c304bb5d03e\r\n\r\n分析符号: \r\n重新检查解决方案: 0\r\n报告 ID: 6d0095e0-0a04-4bab-ae6c-10c54a75133f\r\n报告状态: 4\r\n哈希存储段: \r\nCab GUID: 0"
+  },
+  {
+    "TimeCreated": "2026-10-21T08:20:34.4899664+08:00",
+    "Id": 1000,
+    "ProviderName": "Application Error",
+    "Message": "出错应用程序名称： sqlink-p2.exe，版本： 0.1.3.0，时间戳： 0x6ad73d6d\r\n出错模块名称： sqlink-p2.exe， 版本： 0.1.3.0，时间戳： 0x6ad73d6d\r\n异常代码： 0xc00000fd\r\n错误偏移： 0x000000000145c2a7\r\n出错进程 ID： 0xCDB8\r\n出错应用程序开始时间： 0x1DD60F1BB68C142\r\nFaulting 应用程序路径： E:\\kimidata\\kimi\\workspaces\\sqlconnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin\\sqlink-p2.exe\r\nFaulting 模块路径： E:\\kimidata\\kimi\\workspaces\\sqlconnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin\\sqlink-p2.exe\r\nReport ID： 6d0095e0-0a04-4bab-ae6c-10c54a75133f\r\nFaulting 包全名： \r\nFaulting 程序包相对应用程序 ID：  个"
+  },
+  {
+    "TimeCreated": "2026-10-21T08:17:18.9529437+08:00",
+    "Id": 1001,
+    "ProviderName": "Windows Error Reporting",
+    "Message": "故障存储段 1748194672543108783，类型 4\r\n事件名称: APPCRASH\r\n响应: 不可用\r\nCab ID: 0\r\n\r\n问题签名:\r\nP1: sqlink-p2.exe\r\nP2: 0.1.3.0\r\nP3: 6ad73d6d\r\nP4: sqlink-p2.exe\r\nP5: 0.1.3.0\r\nP6: 6ad73d6d\r\nP7: c00000fd\r\nP8: 000000000145c2a7\r\nP9: \r\nP10: \r\n\r\n附加文件:\r\n\\\\?\\C:\\ProgramData\\Microsoft\\Windows\\WER\\Temp\\WER.12ff771d-3cd3-48e4-bf75-719d1a47331f.tmp.WERInternalMetadata.xml\r\n\r\n可在此处获取这些文件:\r\n\\\\?\\C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_sqlink-p2.exe_7c93425568690c32a406b0fee7dfdadf7b946_65f80358_679d4c73-aedc-46a0-93cc-e521bbfdc404\r\n\r\n分析符号: \r\n重新检查解决方案: 0\r\n报告 ID: 7ced9601-5680-42a6-89e9-ccf6c0502946\r\n报告状态: 268435456\r\n哈希存储段: 22614a4ac54499d83842d5cad7298eaf\r\nCab GUID: 0"
+  },
+  {
+    "TimeCreated": "2026-10-21T08:17:17.595451+08:00",
+    "Id": 1001,
+    "ProviderName": "Windows Error Reporting",
+    "Message": "故障存储段 ，类型 0\r\n事件名称: APPCRASH\r\n响应: 不可用\r\nCab ID: 0\r\n\r\n问题签名:\r\nP1: sqlink-p2.exe\r\nP2: 0.1.3.0\r\nP3: 6ad73d6d\r\nP4: sqlink-p2.exe\r\nP5: 0.1.3.0\r\nP6: 6ad73d6d\r\nP7: c00000fd\r\nP8: 000000000145c2a7\r\nP9: \r\nP10: \r\n\r\n附加文件:\r\n\r\n可在此处获取这些文件:\r\n\\\\?\\C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue\\AppCrash_sqlink-p2.exe_7c93425568690c32a406b0fee7dfdadf7b946_65f80358_679d4c73-aedc-46a0-93cc-e521bbfdc404\r\n\r\n分析符号: \r\n重新检查解决方案: 0\r\n报告 ID: 7ced9601-5680-42a6-89e9-ccf6c0502946\r\n报告状态: 4\r\n哈希存储段: \r\nCab GUID: 0"
+  },
+  {
+    "TimeCreated": "2026-10-21T08:17:15.7239978+08:00",
+    "Id": 1000,
+    "ProviderName": "Application Error",
+    "Message": "出错应用程序名称： sqlink-p2.exe，版本： 0.1.3.0，时间戳： 0x6ad73d6d\r\n出错模块名称： sqlink-p2.exe， 版本： 0.1.3.0，时间戳： 0x6ad73d6d\r\n异常代码： 0xc00000fd\r\n错误偏移： 0x000000000145c2a7\r\n出错进程 ID： 0xD9C8\r\n出错应用程序开始时间： 0x1DD60F050FDC6CB\r\nFaulting 应用程序路径： E:\\kimidata\\kimi\\workspaces\\sqlconnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin\\sqlink-p2.exe\r\nFaulting 模块路径： E:\\kimidata\\kimi\\workspaces\\sqlconnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin\\sqlink-p2.exe\r\nReport ID： 7ced9601-5680-42a6-89e9-ccf6c0502946\r\nFaulting 包全名： \r\nFaulting 程序包相对应用程序 ID：  个"
+  }
+]

@@ -1,0 +1,57 @@
+{
+  "rows": {
+    "mysql": "1\tfirst\ttext:initial\t00FF00\t0\r\n2\tsecond\t<SQL NULL>\t\t0\r\n9007199254740993\tlarge key\ttext:NULL\tFF\t9223372036854775807",
+    "postgres": "1\tfirst\ttext:initial\t00ff00\t0\r\n2\tsecond\t<SQL NULL>\t\t0\r\n9007199254740993\tlarge key\ttext:NULL\tff\t9223372036854775807",
+    "sqlite": [
+      [
+        "1",
+        "first",
+        "text:initial",
+        "00FF00",
+        "0",
+        1.5
+      ],
+      [
+        "2",
+        "second",
+        "<SQL NULL>",
+        "",
+        "0",
+        2.5
+      ],
+      [
+        "9007199254740993",
+        "large key",
+        "text:NULL",
+        "FF",
+        "9223372036854775807",
+        3.5
+      ]
+    ]
+  },
+  "pages": {
+    "mysql": "1003\t1\t1003",
+    "postgres": "1003\t1\t1003",
+    "sqlite": [
+      1003,
+      1,
+      1003
+    ]
+  },
+  "imports": {
+    "mysql": "1\t合成导入\r\n9007199254740993\t9223372036854775807",
+    "postgres": "1\tbefore-sleep",
+    "sqlite": [
+      [
+        "1",
+        "first;合成值"
+      ],
+      [
+        "9007199254740993",
+        "9223372036854775807"
+      ]
+    ]
+  },
+  "source": "官方 mysql/psql 客户端及 SQLite 只读文件连接；仅本轮隔离合成夹具",
+  "CapturedStage": "栈修复版完成真实UI导入、PG取消及回执查询后，官方客户端和SQLite只读连接独立回验通过"
+}

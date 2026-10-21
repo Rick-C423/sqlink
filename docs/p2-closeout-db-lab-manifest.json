@@ -1,0 +1,120 @@
+{
+  "GeneratedUtc": "2026-10-21T00:46:29.1054789Z",
+  "Purpose": "本轮真实数据库验收专用实例；无系统服务安装，不改既有数据库。",
+  "LabRoot": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff",
+  "Credentials": "本轮受保护连接串、测试密码及数据目录已随实验目录删除；公开清单不含凭据。",
+  "Instances": [
+    {
+      "Engine": "mysql8",
+      "Version": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\mysql8-binaries\\mysql-8.4.11-winx64\\bin\\mysqld.exe  Ver 8.4.11 for Win64 on x86_64 (MySQL Community Server - GPL)",
+      "Host": "127.0.0.1",
+      "Port": 62687,
+      "Pid": 47280,
+      "StartedUtc": "2026-10-20T09:38:22.651108Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\mysql8-data",
+      "Bin": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\mysql8-binaries\\mysql-8.4.11-winx64\\bin",
+      "Database": "sqlink_test_719877b804f2406baed8c401f07b4531",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\test-env.ps1"
+    },
+    {
+      "Engine": "postgres",
+      "Version": "postgres (PostgreSQL) 17.11",
+      "Host": "127.0.0.1",
+      "Port": 62698,
+      "Pid": 23548,
+      "StartedUtc": "2026-10-20T09:38:28.3053914Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\postgres-data",
+      "Bin": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\postgresql-runtime\\pgsql\\bin",
+      "Database": "sqlink_test_dd99db4216f546fc9033e266e972f8e2",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff\\test-env.ps1"
+    }
+  ],
+  "DownloadEvidence": [
+    {
+      "Engine": "mysql8",
+      "Version": "8.4.11",
+      "DownloadUrl": "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip",
+      "FileName": "mysql-8.4.11-winx64.zip",
+      "Length": 281191914,
+      "MeasuredSha256": "A492371D687D2BAB088B0062581144A0044B8964BAEFDF4FAA579292B423D25C",
+      "LocalFingerprintMatched": true,
+      "PriorLengthAvailable": true,
+      "VendorChecksumVerified": false,
+      "Verification": "对照前轮公开 p203 清单核对两包 SHA256 与长度；不是本轮厂商校验或签名验证。",
+      "Success": true
+    },
+    {
+      "Engine": "postgres",
+      "Version": "17.11",
+      "DownloadUrl": "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260616",
+      "FileName": "postgresql-17.11-windows-x64-binaries.zip",
+      "Length": 381531864,
+      "MeasuredSha256": "80379B2C04D51C30225532E0AE04509899141E9957ED096FE749D7FD9DF8F82F",
+      "LocalFingerprintMatched": true,
+      "PriorLengthAvailable": true,
+      "VendorChecksumVerified": false,
+      "Verification": "对照前轮公开 p203 清单核对两包 SHA256 与长度；不是本轮厂商校验或签名验证。",
+      "Success": true
+    }
+  ],
+  "SqlServer": "用户无 SQL Server 实例；本轮未探测、安装或启动 SQL Server。",
+  "EnvironmentPreparation": {
+    "TestsRun": false,
+    "CargoRun": false,
+    "Failure": null,
+    "CleanupOwner": "主代理在测试完成后核对进程身份并清理本轮实验目录与构建目录。"
+  },
+  "Cleanup": {
+    "CompletedUtc": "2026-10-21T00:46:34.9321537Z",
+    "GracefulDatabaseStop": true,
+    "OwnedProcessesRemaining": 0,
+    "IsolatedKeychainEntryRemoved": true,
+    "Removed": [
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff",
+        "Bytes": 3197907013,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\sqlink-p2-closeout-bcb0e5db938144edad42e4ec37471936",
+        "Bytes": 3359549250,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin",
+        "Bytes": 31844864,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Roaming\\com.sqlconnect.acceptance.p2.b5bb9322f6284cd0b893d860969eafa4",
+        "Bytes": 5376,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Local\\com.sqlconnect.acceptance.p2.b5bb9322f6284cd0b893d860969eafa4",
+        "Bytes": 77332724,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-desktop-sqlite.db",
+        "Bytes": 36864,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-final-bin\\SQLink.exe.preview-stack-failed",
+        "Bytes": 31842304,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-final-bin\\SQLink.exe.layout-overflow",
+        "Bytes": 31844864,
+        "ExistsAfter": false
+      }
+    ],
+    "FreedBytes": 6730363259,
+    "ByteMeasurement": "删除前文件 Length 合计，不是磁盘空闲空间差值。",
+    "OtherProjectsUntouched": true
+  }
+}

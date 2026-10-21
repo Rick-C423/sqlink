@@ -1,0 +1,1777 @@
+{
+  "generatedUtc": "2026-10-21T01:18:44.494155+00:00",
+  "baselineCommit": "53abb8f53be5a2513482d0118787eabba83d4280",
+  "workingHeadAtEvidenceCollection": "67aa8bfd4594097a20683733f0d445daca184ec8",
+  "frontend": {
+    "passed": 221,
+    "failed": 0,
+    "log": ".zcode/p2-closeout-frontend-final.log",
+    "logSha256": "D7B96CEA7AE72D5C8E9E787FCA44CDCD67A317F65ED501B0456E31D3F326E8A8"
+  },
+  "rustDefaultBeforeStackFix": {
+    "log": ".zcode/p2-closeout-rust-final.log",
+    "logSha256": "6741F492431EB30CE83C4BC4CAEAC811C1B56D224BB1400BCD89B6B1F965BA61",
+    "passed": 291,
+    "failed": 0,
+    "ignored": 47,
+    "summaries": 37,
+    "unitPassed": 180,
+    "localIntegrationPassed": 108,
+    "networkEntrypointsReturnedWithoutConfiguration": 3,
+    "note": "此前默认Cargo共291个ok，其中integration旧骨架的MySQL/PG/MSSQL共3个缺配置提前返回，未计入本地实库通过。47个ignored另列，不计通过。"
+  },
+  "rustFinal": {
+    "unit": {
+      "log": ".zcode/p2-closeout-rust-unit-stack-fix.log",
+      "logSha256": "A214438AD175DE89060C6B0A6763805320D02CD72FC80AF6CA5560D5F8A8122D",
+      "passed": 181,
+      "failed": 0,
+      "ignored": 11,
+      "summaries": 1
+    },
+    "uniqueLocalIntegrationPassed": 109,
+    "postStackFixImportLocal": {
+      "log": ".zcode/p2-closeout-import-stack-integration.log",
+      "logSha256": "9793CA24BFD64895FDF12BC82AFB13DFCA546E1E516F92F20F482BE13DB026F5",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "summaries": 3
+    },
+    "postStackFixLegacy": {
+      "log": ".zcode/p2-closeout-import-legacy-stack-fix.log",
+      "logSha256": "321B90CA0E4CB391CAE793275F65CBFE838F4DB05AF814944FDCB5B08E1ED6CF",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "summaries": 2
+    },
+    "note": "栈修复后181项单元全量重跑；受影响的导入/恢复/兼容均重跑，新增1MiB窄栈真实预检和执行测试，未改变的数据集等验收沿用之前证据。"
+  },
+  "network": {
+    "passed": 35,
+    "failed": 0,
+    "engines": [
+      "MySQL 8.4.11",
+      "PostgreSQL 17.11"
+    ],
+    "runs": [
+      {
+        "log": ".zcode/p2-closeout-network-batch.log",
+        "logSha256": "2F69576C23ED40D7EF026649C945A98D4B3AE5024D15A3C857E5B0274D8CFCA3",
+        "passed": 20,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 9
+      },
+      {
+        "log": ".zcode/p2-closeout-network-cancel.log",
+        "logSha256": "28B35B1727E0AFD86A966A7039D4444EEC53E4FCFE8A1AEE3FA93812580577BF",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 37
+      },
+      {
+        "log": ".zcode/p2-closeout-network-commit-mysql.log",
+        "logSha256": "1E1BA32ACEB3958AEE13BD2D4A175A089C70380A5933EF6827BFF26F26442B54",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      },
+      {
+        "log": ".zcode/p2-closeout-network-commit-pg.log",
+        "logSha256": "7EECCEBE7BEF4CE0DCC427983B07584B6AE7181BC814D634C41FDE1C12C94CEF",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      },
+      {
+        "log": ".zcode/p2-closeout-network-context-mysql.log",
+        "logSha256": "606BD1B3785320D023DAD7AD1368D0594427C3B12566FB4552B67CA4F6812445",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      },
+      {
+        "log": ".zcode/p2-closeout-network-context-pg.log",
+        "logSha256": "AC7DA75A5888838220CD1570BF436C9BB7BADD13ADC0569372A92D39971F87DD",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      },
+      {
+        "log": ".zcode/p2-closeout-network-export.log",
+        "logSha256": "CACBA84E7AC2F77BA4BB907C792AA25A308D1E658AD8D73BE24A5484127C93AC",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      },
+      {
+        "log": ".zcode/p2-closeout-network-metadata.log",
+        "logSha256": "3FACDBD798533F686D2215451999132A93B8E08335256D45FD7D3260AE5A997A",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      },
+      {
+        "log": ".zcode/p2-closeout-network-public-commit.log",
+        "logSha256": "404EC46A46D5BF5A84BF898A9BFC936E675451957EB4389C7C69DCE1F2600FB8",
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "summaries": 1
+      }
+    ],
+    "postStackFixImportRerun": {
+      "log": ".zcode/p2-closeout-import-network-stack-fix.log",
+      "logSha256": "1EF53E5D7D372DCA83DA8E91DBF99F9EB86C08765CECC334C28BAC721A36B365",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "summaries": 1
+    },
+    "note": "修复后重跑的2项导入实库已包含在原35项中，不重复累计。"
+  },
+  "sqlServer": {
+    "runtimeAccepted": false,
+    "gridEditingEnabled": false,
+    "note": "无独立实例，仅编译及纯方言/逻辑测试。"
+  },
+  "performance": {
+    "DBfileLength": 141606912,
+    "count": {
+      "rows": 1000000,
+      "wall_ms": 135.8264
+    },
+    "fixture_wall_ms": 1067.08,
+    "page_size": 100,
+    "payload_bytes": 128,
+    "phase": "complete",
+    "process_id": 2972,
+    "row_count": 1000000,
+    "samples": [
+      {
+        "approxBytes": 39444,
+        "first_id": 1,
+        "hasMore": true,
+        "last_id": 100,
+        "page": 1,
+        "paginationMode": "offset",
+        "repetition": 1,
+        "rows": 100,
+        "wall_ms": 2.4499
+      },
+      {
+        "approxBytes": 39660,
+        "first_id": 101,
+        "hasMore": true,
+        "last_id": 200,
+        "page": 2,
+        "paginationMode": "keyset",
+        "repetition": 1,
+        "rows": 100,
+        "wall_ms": 2.8996999999999997
+      },
+      {
+        "approxBytes": 39444,
+        "first_id": 1,
+        "hasMore": true,
+        "last_id": 100,
+        "page": 1,
+        "paginationMode": "offset",
+        "repetition": 2,
+        "rows": 100,
+        "wall_ms": 1.1794
+      },
+      {
+        "approxBytes": 39660,
+        "first_id": 101,
+        "hasMore": true,
+        "last_id": 200,
+        "page": 2,
+        "paginationMode": "keyset",
+        "repetition": 2,
+        "rows": 100,
+        "wall_ms": 1.5226
+      },
+      {
+        "approxBytes": 39444,
+        "first_id": 1,
+        "hasMore": true,
+        "last_id": 100,
+        "page": 1,
+        "paginationMode": "offset",
+        "repetition": 3,
+        "rows": 100,
+        "wall_ms": 1.4561000000000002
+      },
+      {
+        "approxBytes": 39660,
+        "first_id": 101,
+        "hasMore": true,
+        "last_id": 200,
+        "page": 2,
+        "paginationMode": "keyset",
+        "repetition": 3,
+        "rows": 100,
+        "wall_ms": 1.4028
+      },
+      {
+        "approxBytes": 40063,
+        "first_id": 99901,
+        "hasMore": true,
+        "last_id": 100000,
+        "page": 1000,
+        "paginationMode": "offset",
+        "repetition": 1,
+        "rows": 100,
+        "wall_ms": 16.808300000000003
+      },
+      {
+        "approxBytes": 40260,
+        "first_id": 100001,
+        "hasMore": true,
+        "last_id": 100100,
+        "page": 1001,
+        "paginationMode": "keyset",
+        "repetition": 1,
+        "rows": 100,
+        "wall_ms": 1.3832
+      },
+      {
+        "approxBytes": 40063,
+        "first_id": 99901,
+        "hasMore": true,
+        "last_id": 100000,
+        "page": 1000,
+        "paginationMode": "offset",
+        "repetition": 2,
+        "rows": 100,
+        "wall_ms": 18.3219
+      },
+      {
+        "approxBytes": 40260,
+        "first_id": 100001,
+        "hasMore": true,
+        "last_id": 100100,
+        "page": 1001,
+        "paginationMode": "keyset",
+        "repetition": 2,
+        "rows": 100,
+        "wall_ms": 1.8602
+      },
+      {
+        "approxBytes": 40063,
+        "first_id": 99901,
+        "hasMore": true,
+        "last_id": 100000,
+        "page": 1000,
+        "paginationMode": "offset",
+        "repetition": 3,
+        "rows": 100,
+        "wall_ms": 15.6834
+      },
+      {
+        "approxBytes": 40260,
+        "first_id": 100001,
+        "hasMore": true,
+        "last_id": 100100,
+        "page": 1001,
+        "paginationMode": "keyset",
+        "repetition": 3,
+        "rows": 100,
+        "wall_ms": 1.6841
+      },
+      {
+        "approxBytes": 40264,
+        "first_id": 999901,
+        "hasMore": false,
+        "last_id": 1000000,
+        "page": 10000,
+        "paginationMode": "offset",
+        "repetition": 1,
+        "rows": 100,
+        "wall_ms": 148.3396
+      },
+      {
+        "approxBytes": 40264,
+        "first_id": 999901,
+        "hasMore": false,
+        "last_id": 1000000,
+        "page": 10000,
+        "paginationMode": "offset",
+        "repetition": 2,
+        "rows": 100,
+        "wall_ms": 151.5221
+      },
+      {
+        "approxBytes": 40264,
+        "first_id": 999901,
+        "hasMore": false,
+        "last_id": 1000000,
+        "page": 10000,
+        "paginationMode": "offset",
+        "repetition": 3,
+        "rows": 100,
+        "wall_ms": 151.5578
+      }
+    ]
+  },
+  "memory": {
+    "process_id": 2972,
+    "executable": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\sqlink-p2-closeout-bcb0e5db938144edad42e4ec37471936\\release\\deps\\dataset_performance-245ba3d5e99a4d90.exe",
+    "started_utc": "2026-10-20T10:02:48.1921233Z",
+    "sample_interval_ms": 20,
+    "elapsed_ms": 1857.8963,
+    "exit_code": 0,
+    "failure": null,
+    "sample_count": 38,
+    "baseline": {
+      "elapsed_ms": 49.0653,
+      "phase": "process_start",
+      "working_set_bytes": 3198976,
+      "private_memory_bytes": 532480
+    },
+    "working_set_peak_bytes": 25583616.0,
+    "private_memory_peak_bytes": 5226496.0,
+    "phases": {
+      "process_start": {
+        "observed": true,
+        "sample_count": 1,
+        "working_set_peak_bytes": 3198976,
+        "private_memory_peak_bytes": 532480
+      },
+      "fixture": {
+        "observed": true,
+        "sample_count": 22,
+        "working_set_peak_bytes": 24571904,
+        "private_memory_peak_bytes": 3948544
+      },
+      "pages": {
+        "observed": true,
+        "sample_count": 11,
+        "working_set_peak_bytes": 25583616,
+        "private_memory_peak_bytes": 5226496
+      },
+      "count": {
+        "observed": true,
+        "sample_count": 3,
+        "working_set_peak_bytes": 25550848,
+        "private_memory_peak_bytes": 5189632
+      },
+      "complete": {
+        "observed": true,
+        "sample_count": 1,
+        "working_set_peak_bytes": 23244800,
+        "private_memory_peak_bytes": 2727936
+      }
+    },
+    "samples": [
+      {
+        "elapsed_ms": 49.0653,
+        "phase": "process_start",
+        "working_set_bytes": 3198976,
+        "private_memory_bytes": 532480
+      },
+      {
+        "elapsed_ms": 112.6108,
+        "phase": "fixture",
+        "working_set_bytes": 11771904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 153.7932,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 204.7997,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 251.7923,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 301.5924,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 347.104,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 392.4733,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 459.6562,
+        "phase": "fixture",
+        "working_set_bytes": 11788288,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 504.3627,
+        "phase": "fixture",
+        "working_set_bytes": 11804672,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 554.4087,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 598.3349,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 644.0371,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 696.301,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 739.0963,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 785.6873,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 833.6403,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 878.5489,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 925.0904,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 976.3432,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 1023.9259,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 1071.246,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 1117.8467,
+        "phase": "fixture",
+        "working_set_bytes": 24571904,
+        "private_memory_bytes": 3948544
+      },
+      {
+        "elapsed_ms": 1164.5194,
+        "phase": "pages",
+        "working_set_bytes": 25120768,
+        "private_memory_bytes": 4698112
+      },
+      {
+        "elapsed_ms": 1210.3905,
+        "phase": "pages",
+        "working_set_bytes": 25292800,
+        "private_memory_bytes": 4911104
+      },
+      {
+        "elapsed_ms": 1255.3141,
+        "phase": "pages",
+        "working_set_bytes": 25583616,
+        "private_memory_bytes": 5226496
+      },
+      {
+        "elapsed_ms": 1304.3696,
+        "phase": "pages",
+        "working_set_bytes": 25583616,
+        "private_memory_bytes": 5226496
+      },
+      {
+        "elapsed_ms": 1351.0759,
+        "phase": "pages",
+        "working_set_bytes": 25583616,
+        "private_memory_bytes": 5226496
+      },
+      {
+        "elapsed_ms": 1397.1706,
+        "phase": "pages",
+        "working_set_bytes": 25505792,
+        "private_memory_bytes": 5160960
+      },
+      {
+        "elapsed_ms": 1444.3047,
+        "phase": "pages",
+        "working_set_bytes": 25505792,
+        "private_memory_bytes": 5160960
+      },
+      {
+        "elapsed_ms": 1490.1926,
+        "phase": "pages",
+        "working_set_bytes": 25505792,
+        "private_memory_bytes": 5160960
+      },
+      {
+        "elapsed_ms": 1536.9651,
+        "phase": "pages",
+        "working_set_bytes": 25513984,
+        "private_memory_bytes": 5160960
+      },
+      {
+        "elapsed_ms": 1585.0781,
+        "phase": "pages",
+        "working_set_bytes": 25513984,
+        "private_memory_bytes": 5160960
+      },
+      {
+        "elapsed_ms": 1626.9725,
+        "phase": "pages",
+        "working_set_bytes": 25513984,
+        "private_memory_bytes": 5160960
+      },
+      {
+        "elapsed_ms": 1678.976,
+        "phase": "count",
+        "working_set_bytes": 25550848,
+        "private_memory_bytes": 5189632
+      },
+      {
+        "elapsed_ms": 1721.3913,
+        "phase": "count",
+        "working_set_bytes": 25550848,
+        "private_memory_bytes": 5189632
+      },
+      {
+        "elapsed_ms": 1768.7795,
+        "phase": "count",
+        "working_set_bytes": 25550848,
+        "private_memory_bytes": 5189632
+      },
+      {
+        "elapsed_ms": 1822.0412,
+        "phase": "complete",
+        "working_set_bytes": 23244800,
+        "private_memory_bytes": 2727936
+      }
+    ],
+    "measurement": "WorkingSet64/PrivateMemorySize64 的定时实测；短阶段可能未捕获峰值。未观测阶段保留 observed=false；不设性能通过阈值。"
+  },
+  "build": {
+    "frontend": "passed",
+    "isolatedDesktopExe": "passed",
+    "normalConfigurationExe": "passed",
+    "exePath": "E:/KimiData/kimi/Workspaces/SQLConnect/sqlconnect/release-staging/SQLink.exe",
+    "exeBytes": 31844864,
+    "exeSha256": "99E04C4EDE1E05944C792C35493C4BC1F4E498C9C375A7FD079E4A73BEC3C19A",
+    "userAccepted": false,
+    "delivery": {
+      "CompletedUtc": "2026-10-21T00:46:48.0495049Z",
+      "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\release-staging\\SQLink.exe",
+      "Sha256": "99E04C4EDE1E05944C792C35493C4BC1F4E498C9C375A7FD079E4A73BEC3C19A",
+      "Bytes": 31844864,
+      "PreviousSha256": "8F0B3A90B53DD7E148821E2557DB5C187309236F634BAE5088F5508CC9FBCA55",
+      "UserAccepted": false,
+      "ArchiveCreated": false,
+      "ApplicationExecutablesInProject": [
+        "release-staging/SQLink.exe"
+      ],
+      "InventoryMethod": "rg --files --hidden --no-ignore，按 sqlconnect/sqlink 应用 EXE 文件名扫描，排除 node_modules 和 .git；输出仅一项。"
+    }
+  },
+  "ci": {
+    "status": "completed",
+    "conclusion": "success",
+    "repository": "Rick-C423/sqlink",
+    "commit": "db25cdcfbb42fadbfcce082c6677ead7f6335d77",
+    "tree": "207e3a49b2c220f9557b32ccc0ad44e4d9dc3781",
+    "runId": 39522425489,
+    "url": "https://github.com/Rick-C423/sqlink/actions/runs/39522425489",
+    "pullRequest": "https://github.com/Rick-C423/sqlink/pull/1",
+    "branch": "codex/p2-closeout-20261021-bcb0e5db",
+    "mainUnchanged": true,
+    "screenshotsIncluded": false,
+    "jobs": [
+      {
+        "id": 118969170387,
+        "name": "Rust 与 SQLite、PostgreSQL、MySQL 实库",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 39522425489,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Initialize containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Run dtolnay/rust-toolchain@stable",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "准备 Tauri 编译所需前端资源",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "Run npm run build",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7
+          },
+          {
+            "name": "检查专用实库配置（缺失必须失败）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8
+          },
+          {
+            "name": "安装 Tauri 系统依赖",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9
+          },
+          {
+            "name": "Run cargo fmt --check --manifest-path src-tauri/Cargo.toml",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10
+          },
+          {
+            "name": "Rust 单元测试",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "SQLite 实库集成",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "普通查询大整数传输及转储类型 SQLite 回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13
+          },
+          {
+            "name": "读取预算与截断身份 SQLite 回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14
+          },
+          {
+            "name": "流式原值导出与有界单租约导入 SQLite 回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15
+          },
+          {
+            "name": "完整元数据身份、结构修订与导出来源 SQLite 回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16
+          },
+          {
+            "name": "首屏统计解耦、分页游标及导入任务恢复 SQLite 回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17
+          },
+          {
+            "name": "PostgreSQL 与 MySQL 分页统计、导入预检及取消实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18
+          },
+          {
+            "name": "PostgreSQL 非默认 schema 元数据与导出实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19
+          },
+          {
+            "name": "MySQL 跨库同名对象与功能索引实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 20
+          },
+          {
+            "name": "SQL Server 元数据测试仅编译（缺实例不冒充运行）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 21
+          },
+          {
+            "name": "SQL Server 预算实库测试编译（缺实例不冒充运行）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 22
+          },
+          {
+            "name": "可信结果与行身份 SQLite 实库集成",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 23
+          },
+          {
+            "name": "类型绑定与变更预检 SQLite 实库集成",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24
+          },
+          {
+            "name": "独占会话、任务取消与导入 SQLite 实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25
+          },
+          {
+            "name": "受控提交对象身份 SQLite 实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26
+          },
+          {
+            "name": "PostgreSQL 实库集成",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 27
+          },
+          {
+            "name": "PostgreSQL 取消登记清理实库回归（配置或连接缺失必须失败）",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 28
+          },
+          {
+            "name": "PostgreSQL 可信结果与行身份实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 29
+          },
+          {
+            "name": "PostgreSQL 类型参数实库回环",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 30
+          },
+          {
+            "name": "PostgreSQL 独占会话与取消生命周期实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 31
+          },
+          {
+            "name": "PostgreSQL 提交对象身份与事务锁实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 32
+          },
+          {
+            "name": "MySQL 基础实库集成",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 33
+          },
+          {
+            "name": "MySQL 类型参数实库回环",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 34
+          },
+          {
+            "name": "MySQL 可信结果与行身份实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 35
+          },
+          {
+            "name": "MySQL 独占会话与取消生命周期实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 36
+          },
+          {
+            "name": "MySQL 提交对象身份与事务锁实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 37
+          },
+          {
+            "name": "PostgreSQL 与 MySQL 受控提交及会话门禁实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 38
+          },
+          {
+            "name": "PostgreSQL 与 MySQL 读取预算及未读流隔离实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 39
+          },
+          {
+            "name": "PostgreSQL 流式导出与类型回环实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 40
+          },
+          {
+            "name": "MySQL 流式导出与跨库恢复实库回归",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 41
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 80
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 81
+          },
+          {
+            "name": "Stop containers",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 82
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 83
+          }
+        ]
+      },
+      {
+        "id": 118969171075,
+        "name": "前端类型、组件与回归测试",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 39522425489,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Run npm ci",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Run npm test",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5
+          },
+          {
+            "name": "Run npm run build",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13
+          }
+        ]
+      }
+    ]
+  },
+  "stackIncident": {
+    "previousDesktopSha256": "AB03D3F7C93AF0FE2541D9F433C96DEA3ECAEDCD4B1381BB992119E515EF0AD8",
+    "exception": "0xc00000fd",
+    "offset": "0x145c2a7",
+    "mainThreadStackReserve": 1048576,
+    "futureBytesBefore": {
+      "scan": 65928,
+      "preview": 66352,
+      "commandPreview": 66496,
+      "commandExecute": 67616
+    },
+    "futureBytesAfter": {
+      "scan": 416,
+      "preview": 6056,
+      "commandPreview": 152,
+      "commandExecute": 80
+    },
+    "resolution": "固定缓冲直接堆分配、导入IPC边界装箱；原崩溃候选不交付，保留原事件及修复后真实UI证据。"
+  },
+  "desktop": {
+    "status": "本地真实桌面自测完成：三库分页、独立统计与取消、精确整数、导入及回执读回通过；默认视口长回执布局复验通过。编辑提交与800×600未验收，用户实际验收仍待完成",
+    "report": "docs/p2-closeout-desktop-results.json",
+    "readback": "docs/p2-closeout-desktop-readback.json",
+    "evidenceDirectory": "docs/p2-closeout-desktop-evidence",
+    "userAccepted": false
+  },
+  "preservation": [
+    {
+      "path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\release-staging\\SQLink.exe",
+      "baselineSha256": "8F0B3A90B53DD7E148821E2557DB5C187309236F634BAE5088F5508CC9FBCA55",
+      "unchanged": false,
+      "expectedReplacement": true,
+      "replacementSha256": "99E04C4EDE1E05944C792C35493C4BC1F4E498C9C375A7FD079E4A73BEC3C19A",
+      "note": "按用户既有要求在验收后有意替换旧 EXE；其余既有修改和独立稿保留。"
+    },
+    {
+      "path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\docs\\MCP调用参数.md",
+      "baselineSha256": "A9F2747A27C9DC324351DE27664F139E91AA65F160F4E69B16BD73101D04CC36",
+      "unchanged": true
+    }
+  ],
+  "sourceHashes": [
+    {
+      "path": "src-tauri\\src\\atomic_export.rs",
+      "sha256": "0434FCF804429C4C1D812390BA29528A5DE5AF20C8E2FEE3901A7156E0A77724"
+    },
+    {
+      "path": "src-tauri\\src\\changeset.rs",
+      "sha256": "F9298EFA6BD205FAF665575742953A24D9CACCE3ACAD45DB62225E39875E4D2C"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\connection.rs",
+      "sha256": "A2581AB416955BEBED59BD4FF478EAE39BD7473EA5A1F06F868032DCE8529388"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\history.rs",
+      "sha256": "0D1B38AF2DE8D2E83773935CCA2FD8FD8506875412810BAF046BD43504E62B0E"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\import.rs",
+      "sha256": "9015EA69B662D81C92358F25C62B4827B0C3C3F0B7998C09B3D2F6AB19360271"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\mcp.rs",
+      "sha256": "2E950D0134A4C3E4BA96F6412999D0F40CAF076A711660DA37D745401E144148"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\mod.rs",
+      "sha256": "E912ACB722FFA89F1A949CE8BEA8970EEA452E30C26BABD54A0BAFC95DA4AA1A"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\query.rs",
+      "sha256": "E129B7CB7BED4AA5DDCF09C9CA8781A5D4916D704133C1E7C7CA829A2B6C1B6B"
+    },
+    {
+      "path": "src-tauri\\src\\commands\\window.rs",
+      "sha256": "1B0759BE77AA39CE4DBC3C75A878FDF48A94A35483EB8AEC6473DBEB6B3ACA1F"
+    },
+    {
+      "path": "src-tauri\\src\\commit.rs",
+      "sha256": "D63D81160CA4865727FC23BE71B3A445DEDD097850BD2A92F73418F2934CE583"
+    },
+    {
+      "path": "src-tauri\\src\\commit_fault_tests.rs",
+      "sha256": "57891082A4CA542283C5A9D12953A3151CE44A10247A9CDC023F0DC92C17B7CC"
+    },
+    {
+      "path": "src-tauri\\src\\commit_network_tests.rs",
+      "sha256": "44F4B1E719D9620E1740AE523BAA8463689C77BFD08A30BF51277E65A051452B"
+    },
+    {
+      "path": "src-tauri\\src\\commit_receipt.rs",
+      "sha256": "6F0A8D3346864AECABBD47D26A09EA0F50FE61E1D14B2049DF4309708204A8D3"
+    },
+    {
+      "path": "src-tauri\\src\\commit_tests.rs",
+      "sha256": "C41F469827EE01DCFAFE4F98073964C2146F71A03AFA65D3C2D75D2047B28484"
+    },
+    {
+      "path": "src-tauri\\src\\database\\dump.rs",
+      "sha256": "6632363928F7A69D0C3CFA463D5C6EC4496C90E74CC96E2617D6F9AFB928F2B3"
+    },
+    {
+      "path": "src-tauri\\src\\database\\mod.rs",
+      "sha256": "B773D7B66708FD1460CA66EE27965504B65B340ABBB7E8363CA99AF9CDE11842"
+    },
+    {
+      "path": "src-tauri\\src\\database\\mssql.rs",
+      "sha256": "F36AC06ABDAED38AE215502E1E7D339FDF9FF29B17FA0630558C7D9B5B10B148"
+    },
+    {
+      "path": "src-tauri\\src\\database\\mysql.rs",
+      "sha256": "9DEB82133623FDB94712169DF93443EC768C775740E64A12892040E0CBEB371B"
+    },
+    {
+      "path": "src-tauri\\src\\database\\pool.rs",
+      "sha256": "1D954840D7C247F0EF94DE18BE71B709DDFD020C01B824A79A04A35E4F6BE3B3"
+    },
+    {
+      "path": "src-tauri\\src\\database\\postgres.rs",
+      "sha256": "36AFA589D4C183636F86B7005C0337928DA1F9C741EAAA64A366B2BDA3009DFA"
+    },
+    {
+      "path": "src-tauri\\src\\database\\result_budget.rs",
+      "sha256": "ADF113D7F80F5B9CC5F115B941768835F2DDCCF2104E3D09123371A2715A14AD"
+    },
+    {
+      "path": "src-tauri\\src\\database\\sqlite.rs",
+      "sha256": "A9DFDBF3E5F66678C98C885F2E4F6E873617D2FBE3AE3A0E2761F75389A7519B"
+    },
+    {
+      "path": "src-tauri\\src\\dataset.rs",
+      "sha256": "3CC74555A5140297405B88AEAC8952705FEBE55C0FB2FD51267881D3D3E09C14"
+    },
+    {
+      "path": "src-tauri\\src\\export.rs",
+      "sha256": "9D37F6E5290691ED1829AC9EE09F8B69AFD259C26CF35FE4FC3E87AC4A5D99AE"
+    },
+    {
+      "path": "src-tauri\\src\\history.rs",
+      "sha256": "B9E7AC4953025C20E88FF69891631529EF2FDAD5BA5DAB4BD508FB54B4089D54"
+    },
+    {
+      "path": "src-tauri\\src\\import_jobs.rs",
+      "sha256": "69DA09C2334358B280F84FFFC10FFFEA0B7B63240ECFF9C337B7413B4F4A75B6"
+    },
+    {
+      "path": "src-tauri\\src\\lib.rs",
+      "sha256": "019DEBA6300931CD35CB0D1F01A9C67BF9DB6C1ADE4CA48EC7FE6B783B5444C5"
+    },
+    {
+      "path": "src-tauri\\src\\logging.rs",
+      "sha256": "DC03A16318A1EB604D45F47553D1B8C5DE7330BB8461801E1AA5B00FDA510516"
+    },
+    {
+      "path": "src-tauri\\src\\main.rs",
+      "sha256": "5AF82FCAE0027F6D1AD092FBB722030BB20F0C35A1A12AE40EFFA49F0660D3D6"
+    },
+    {
+      "path": "src-tauri\\src\\mcp.rs",
+      "sha256": "CC95AF66389CF2D90117AB27797E639E9143187AF839B4C10E430E8B15C2FD25"
+    },
+    {
+      "path": "src-tauri\\src\\mcp_settings.rs",
+      "sha256": "7177AB0D193B9DB0612F0E44FB8866E879E8A3E9DEEE92DAC3AE22152BE083F8"
+    },
+    {
+      "path": "src-tauri\\src\\metadata.rs",
+      "sha256": "5B9AB23CBA882A397C47C814DE8000B256C4FE6CC370E72865B1ED45BD5B71CA"
+    },
+    {
+      "path": "src-tauri\\src\\models\\mod.rs",
+      "sha256": "0D65DA0AE2B9CD2384D892F41882A5EA76FCB6C37C4318D16E185099CDE40ACD"
+    },
+    {
+      "path": "src-tauri\\src\\query_tasks.rs",
+      "sha256": "1C82FB2D1CBACAC2B5292B1D304A3492E6F0DCC7F25477255A4BC3B66AD01772"
+    },
+    {
+      "path": "src-tauri\\src\\result_context.rs",
+      "sha256": "4E33DE9D635EDC97E667018C4623CA8C0E229DB7B85CA704609BEFFD8F38C173"
+    },
+    {
+      "path": "src-tauri\\src\\session.rs",
+      "sha256": "FE5A0E4C3C7A7C186DCC2023C7CC2D8D16B5545BAE3EBADCC5E02D11414E02BA"
+    },
+    {
+      "path": "src-tauri\\src\\store.rs",
+      "sha256": "DBEFAF9B5813958678A947429F9126436F4E90B16CD20FA8375BEECDC08C63DC"
+    },
+    {
+      "path": "src-tauri\\src\\table_result.rs",
+      "sha256": "F9D9676AB336CDA7205F31DEB8D155BA69A65644606F5971F1FF38762620D091"
+    },
+    {
+      "path": "src-tauri\\src\\task_registry.rs",
+      "sha256": "CA24A6418F6F15F7E1C4E88AC8654A68088E481AC31B53CEE02323F710C1B7A4"
+    },
+    {
+      "path": "src-tauri\\src\\typed_value.rs",
+      "sha256": "D0992995B12BB6269898B933ABFE0360A827644B8521A21200DAB16FC5DA7250"
+    },
+    {
+      "path": "src-tauri\\tests\\changeset.rs",
+      "sha256": "FD9C35A6B98127DB8A9B123135D755B3A0A8EB8589E39E1337B6D7FD7464605E"
+    },
+    {
+      "path": "src-tauri\\tests\\commit_identity_network.rs",
+      "sha256": "8A8D744A85EB0231A476FBF916596DE5F1BE24957CB902ADFE7F67F80816B167"
+    },
+    {
+      "path": "src-tauri\\tests\\commit_identity_sqlite.rs",
+      "sha256": "E72B71CFC944EC4A1F3E4B07707FF98EFBD5B3D23AA986ADB78AFED41AE662DC"
+    },
+    {
+      "path": "src-tauri\\tests\\dataset_network.rs",
+      "sha256": "6B07298DC5389153D64DD52BFF525E1072FC98E3798A4977012D389314F31F0F"
+    },
+    {
+      "path": "src-tauri\\tests\\dataset_performance.rs",
+      "sha256": "8997B9A1542F4DA8BBFFE9B3C5E4FA8110E449E34D3AF69E7EF259FF2CD4CE1B"
+    },
+    {
+      "path": "src-tauri\\tests\\dataset_sqlite.rs",
+      "sha256": "0BD6DD5659E38F8DDB941C0C7ECAEF1CDD97A43A008236D96B1D76B28468BD2B"
+    },
+    {
+      "path": "src-tauri\\tests\\export_mysql.rs",
+      "sha256": "C1E73D1D885BE9E3CB35CF5923EC3DFE0F11DE5F287ABE1A8072CA96EBA1BFBB"
+    },
+    {
+      "path": "src-tauri\\tests\\export_mysql_restore.rs",
+      "sha256": "9EAA97A25836D8DB9ACD4F88683360E2D72DB5F707C9A4866B22746040C0ACF0"
+    },
+    {
+      "path": "src-tauri\\tests\\export_network.rs",
+      "sha256": "0B346D5CD21CA53936AC3E0300800535C63A5C58D0B40D80EA2601DCA0FD30CB"
+    },
+    {
+      "path": "src-tauri\\tests\\export_sqlite.rs",
+      "sha256": "3F62F4EF8CFB3FAEC4081B1C97F604A02AACABAF4455DDF6270355B94C79AB43"
+    },
+    {
+      "path": "src-tauri\\tests\\import_job_pg_mysql.rs",
+      "sha256": "8D642D9CB91540C69474FC6F5E1BD4C2BFB8B5A9FF60F7E0474861EC59947ADD"
+    },
+    {
+      "path": "src-tauri\\tests\\import_job_recovery.rs",
+      "sha256": "E7F1FE1F47BE4D18DEC0A6B25080DDFD3431F2C123D5A8BC61ECD1772DF90618"
+    },
+    {
+      "path": "src-tauri\\tests\\import_job_sqlite.rs",
+      "sha256": "1F68BE79DE723550A697FD7F0D143C180FFF4875D30A383FAC4FB1E870D71BFE"
+    },
+    {
+      "path": "src-tauri\\tests\\import_job_stack.rs",
+      "sha256": "23BD855BCA17FA49694F6946FA3B64F897F60C31546B52DAD5B202D5D3797F6D"
+    },
+    {
+      "path": "src-tauri\\tests\\import_limits.rs",
+      "sha256": "82CF2DA13D458A9914587E0E4F32E16FCB6E9A1CE9CCC70999C2E13B532F00FB"
+    },
+    {
+      "path": "src-tauri\\tests\\import_session.rs",
+      "sha256": "25ADC79AC3569CA6493FFCDEF90905DD4B941D251AFE7BD2F1F5F77F82F4F49D"
+    },
+    {
+      "path": "src-tauri\\tests\\import_skip_mysql.rs",
+      "sha256": "2B9C54AAC2FFCC0163615AE25958BF946E04961862DD7ADE268F946ACB77386A"
+    },
+    {
+      "path": "src-tauri\\tests\\integration.rs",
+      "sha256": "9B80DF437561CC3E03CD0EA88EBDF897400F8BF5B43E9DAA573F6AC2F65BC99A"
+    },
+    {
+      "path": "src-tauri\\tests\\metadata_mysql.rs",
+      "sha256": "AE00F77B2B336B191FF092DA92CCD3EA2F289F6D29A75197010712BD85ED3999"
+    },
+    {
+      "path": "src-tauri\\tests\\metadata_network.rs",
+      "sha256": "0A5992E60ACEB301AC0E1B52926B3539B6109EDD03CD99FDFD9D97193EA1E298"
+    },
+    {
+      "path": "src-tauri\\tests\\metadata_service.rs",
+      "sha256": "ABDCB14C7D81714EAEBEB84036418D32705766D63866FB45ED2C15EDFCE97580"
+    },
+    {
+      "path": "src-tauri\\tests\\metadata_sqlite.rs",
+      "sha256": "8B416581C4115ED3484454572071696051F1F2381CF459D86E3143E673EDE6A9"
+    },
+    {
+      "path": "src-tauri\\tests\\plain_query_integers.rs",
+      "sha256": "9EE3049616DE095191DC7A6B4D2C881C13F16117A85F8F016F53B42252B8BC4C"
+    },
+    {
+      "path": "src-tauri\\tests\\query_budget_mssql.rs",
+      "sha256": "555C369CFEEEEC5254D434D09ECF83643AC37EFB359B063A0AE25995412FCF0E"
+    },
+    {
+      "path": "src-tauri\\tests\\query_budget_mysql.rs",
+      "sha256": "C401A479589FD55A1094D7B6028FF10B985F0BAC04CB683C72FC2ABDD5AAAB50"
+    },
+    {
+      "path": "src-tauri\\tests\\query_budget_postgres.rs",
+      "sha256": "A615506048F916003D3CECD777B1A5696C8C7EC415698E6823A195AB7C269722"
+    },
+    {
+      "path": "src-tauri\\tests\\query_budget_sqlite.rs",
+      "sha256": "E1146C8CF73A8004AB0E07FE0FA116AD3A2FF5F104AF459799A8D7B2F8403332"
+    },
+    {
+      "path": "src-tauri\\tests\\query_tasks.rs",
+      "sha256": "D1BD029E933371D09CA5B1EBC2B715FB0F2F0CB45A5345812A05B3BA4EA89810"
+    },
+    {
+      "path": "src-tauri\\tests\\result_context.rs",
+      "sha256": "9B5C28362019F863E1BB201566441D8D7E8BE7E6925F56BEF4C6FEDBE29E2924"
+    },
+    {
+      "path": "src-tauri\\tests\\result_context_network.rs",
+      "sha256": "419C4F9961EC2FE9D70E8E9D0BE9D769CE784467DF194BADD30B5B592911CB72"
+    },
+    {
+      "path": "src-tauri\\tests\\session_mssql.rs",
+      "sha256": "3A7FEA7739FA748FE7155F5FEC8E80C9942B84EFF85BD7C4F1CAD7C1A3EE1539"
+    },
+    {
+      "path": "src-tauri\\tests\\session_pg_mysql.rs",
+      "sha256": "C7208DCBFF5BA93438785D5ECD046B19DA801F19A1CABB06C9CAFA0AF60F5D92"
+    },
+    {
+      "path": "src-tauri\\tests\\session_sqlite.rs",
+      "sha256": "91EFCF42B03A88E99FDFBF1819EE4D07328750C700E724CB95CF0BAB37EB44E2"
+    },
+    {
+      "path": "src-tauri\\tests\\typed_binding_mysql_network.rs",
+      "sha256": "9713A95F68425702280D7D9DEA7BCB80398CE71BF68E100F8D9649A88C04881A"
+    },
+    {
+      "path": "src-tauri\\tests\\typed_binding_network.rs",
+      "sha256": "80040AACC5830EE9E93F9C9D95030CA939B557011BF03403D965CBDC32DEA8F2"
+    },
+    {
+      "path": "src-tauri\\tests\\typed_binding_sqlite.rs",
+      "sha256": "84EA59F2ACF8BEF869E1FCC6B10D85C20873026B7242DA5B4BADF0AE615AC7A5"
+    },
+    {
+      "path": "src\\App.tsx",
+      "sha256": "47CA7043F5FD5943512AB468E400416F6A1194947C514E076BE23C846075FCE3"
+    },
+    {
+      "path": "src\\components\\ContextMenu.tsx",
+      "sha256": "AD24FA7C168C8380EA125A0FA9D2F0D6E496C83956851DA7565CC8A37F38D1A5"
+    },
+    {
+      "path": "src\\components\\CreateTableView.tsx",
+      "sha256": "547AF0168EA0913BB899E084D1B70359E64FD0F85512DEC478186FEF58940EC0"
+    },
+    {
+      "path": "src\\components\\DatabaseOverview.tsx",
+      "sha256": "EBB39DFF6A2B592BA0ADA11B1C321560560D3EE536AD6EE499BCA09564BC8B88"
+    },
+    {
+      "path": "src\\components\\PrivilegeEditor.tsx",
+      "sha256": "6B5D4FCF042F71F2740B8BD02BA363B050D867E1147DD3A52B0C7F563A6D58CD"
+    },
+    {
+      "path": "src\\components\\RoutineView.tsx",
+      "sha256": "354785530BF8AB9121339718C095467029129E88D311D28D56CFD7BBE2251752"
+    },
+    {
+      "path": "src\\components\\ServerOverview.tsx",
+      "sha256": "F84B19B1114AF110451D534CB00E64C8A2D04315A062DE99643774FCD21E97EA"
+    },
+    {
+      "path": "src\\components\\TableView.tsx",
+      "sha256": "B62CFBA00D2FEAF4923F42C63144B74C64961AECDC5416A00947A190B0560B11"
+    },
+    {
+      "path": "src\\components\\UsersView.tsx",
+      "sha256": "5E6C87EDF6B6A52D4175266453BB25FBAB1F2BC199A9B3DAA13C2ED48624A248"
+    },
+    {
+      "path": "src\\components\\ViewView.tsx",
+      "sha256": "30BD8611873BFB8418BB49004B313A0F516952BCCB7B60FF29BFB3BCB9F4FD32"
+    },
+    {
+      "path": "src\\components\\connection\\ConnectionDialog.tsx",
+      "sha256": "A7A5861698B4018E46AB67F47A95FD1F50F7B7D0239E0E90680F5F5CC3F192E3"
+    },
+    {
+      "path": "src\\components\\connection\\ConnectionTree.tsx",
+      "sha256": "E7B0B21A1D969B25CD27F5C3BBF8F9E89D96647A1BA12839FD8EA0247E2CA0CE"
+    },
+    {
+      "path": "src\\components\\connection\\CreateDatabaseDialog.tsx",
+      "sha256": "21122F3F5C97331AEF5F17053A6D43A6898A3D95D36AEB01AEF1BC8BF516F182"
+    },
+    {
+      "path": "src\\components\\connection\\CredentialStatus.tsx",
+      "sha256": "D0C6D380B91F035A52A8C0A2D541D554416B9E82EA77F7AC99B3F922CF1F091F"
+    },
+    {
+      "path": "src\\components\\connection\\DatabaseInfoPanel.tsx",
+      "sha256": "9904B63D09F7F61C14F65C824C9D122D17100318DE07340552193F739619C93E"
+    },
+    {
+      "path": "src\\components\\connection\\ExportSqlDialog.tsx",
+      "sha256": "91D28B56356B1146C8D3EA94448B3BB527EA80BACB5CD60B354F857497BF6EC2"
+    },
+    {
+      "path": "src\\components\\connection\\ImportSqlDialog.tsx",
+      "sha256": "FE876DB7A98D18D9FBEE38A264BA9C9244DF8E771565D4D8497DEC84C34AEADC"
+    },
+    {
+      "path": "src\\components\\editor\\SQLEditor.tsx",
+      "sha256": "26E83F5F0CBF194E98100A82E449D11F6425F331F5CDC8EDBA89C73600FDFC57"
+    },
+    {
+      "path": "src\\components\\mcp\\McpSettingsDialog.tsx",
+      "sha256": "D4A481D982354196B34DCFBFBE592127ECEBD266CC1891369238F58FAAF40E43"
+    },
+    {
+      "path": "src\\components\\result\\DataGrid.tsx",
+      "sha256": "8086DBA087F3F30CF19C22419574F38FB778B5AB31650EF753BBAC4E7A6E80D5"
+    },
+    {
+      "path": "src\\components\\result\\DraftNavigationDialog.tsx",
+      "sha256": "22A6FF152BBA019216E9F38E7EFEDFCC8171651646B92B8A87F711E21132344D"
+    },
+    {
+      "path": "src\\components\\ui\\Resizer.tsx",
+      "sha256": "357083FE6A1297C6F5D600D25BA8A19CE4D243D0D173158D19A5E4C56968930B"
+    },
+    {
+      "path": "src\\components\\ui\\index.tsx",
+      "sha256": "2B7EA93F3F54BCE15E8D65BABC3A1D2232502B36812222B822656001744063AE"
+    },
+    {
+      "path": "src\\i18n\\en-US.ts",
+      "sha256": "DE623D6BF1DFF666D41C8E1CFF0069DF83325C5AD9CEE1F8E646BE0F0209FA6C"
+    },
+    {
+      "path": "src\\i18n\\index.ts",
+      "sha256": "4CBC78E0BCF0A32B139E5FF22918F066B85F7724FF0546531FA3C971FBDFF472"
+    },
+    {
+      "path": "src\\i18n\\zh-CN.ts",
+      "sha256": "78AC4ADC01EC4FE9909F39D652EEA82FDE24178E39000DBD7F82CD47B4C525F1"
+    },
+    {
+      "path": "src\\index.css",
+      "sha256": "BDDD8A75CCE4120BDC240FBDDAB5AB314F95F579312D0B6CB0ADA6DC5FCC5DA2"
+    },
+    {
+      "path": "src\\lib\\changeset.ts",
+      "sha256": "863572734428AE0E8893C7F1A7F76B5A2EDE96DF30F0BD33DF86764B8AE94E85"
+    },
+    {
+      "path": "src\\lib\\commitReceipt.ts",
+      "sha256": "4E2FBDC4B5CF2C9B68457AEC95C098C6AB8AC4FD425D8DBB14B43EF14DF68225"
+    },
+    {
+      "path": "src\\lib\\credentialStatus.ts",
+      "sha256": "28400DDA4617782CDD815CD3B7BA4D8B776A8AEA7A92A35BF4BEA3C23DF11AE1"
+    },
+    {
+      "path": "src\\lib\\datasetController.ts",
+      "sha256": "A28A93E75E84B66D5D7604F75EF759E07C353A60F8F8E0C07D18584587687134"
+    },
+    {
+      "path": "src\\lib\\ddl.ts",
+      "sha256": "B96B9F4273F8894A5A48B5C30C0E54F9224F68D621F8BB0F197ADE6D1E35009B"
+    },
+    {
+      "path": "src\\lib\\gridCellInput.ts",
+      "sha256": "D1EC8454235927CE79CB02253D6256C46A12F657BBB1DE720D8DD3CBF3384558"
+    },
+    {
+      "path": "src\\lib\\gridEdits.ts",
+      "sha256": "F512292E78C882CE64F1286DFC38DCF17D4B102CC9FA5C61FC736A8597782634"
+    },
+    {
+      "path": "src\\lib\\gridSort.ts",
+      "sha256": "C8908265ECEB589442EB1B8A2C7E2E8D754BEDE1559299E9363E862DFAED5713"
+    },
+    {
+      "path": "src\\lib\\metadataCache.ts",
+      "sha256": "FAF4174AC6B3AB4F0D97C3556C3A752DEF2BAE1449D6DC87E9087511C5FBB385"
+    },
+    {
+      "path": "src\\lib\\objectIdentity.ts",
+      "sha256": "4ACA7029A4B404C851DAAC8A9FF5F45ECC42E10BCA25EB73D916EA2F13B278F6"
+    },
+    {
+      "path": "src\\lib\\queryActions.ts",
+      "sha256": "6F448BF588B9C38C7F9A4296B9ECDC55A866295A92000E267F86B595E4B39CB0"
+    },
+    {
+      "path": "src\\lib\\resultContext.ts",
+      "sha256": "E1DAB0F4C7EE0D95422A88BBEC5B6E6FA667A166E632C2837DB2C10F37F86A20"
+    },
+    {
+      "path": "src\\lib\\sqlTable.ts",
+      "sha256": "E271DB6BD4552EF86021D46E963BB910B5A1E888602274B05434C837D1588477"
+    },
+    {
+      "path": "src\\lib\\tablePaging.ts",
+      "sha256": "2F2149780A3936B8CFD74489B2C78F61C4A092A7480957C1A111FA6C59DEB5F4"
+    },
+    {
+      "path": "src\\lib\\typedValue.ts",
+      "sha256": "D9A0D6201E3C57784B33AC3467D664E1872700206C9635BFE713B6C3DAA78211"
+    },
+    {
+      "path": "src\\lib\\utils.ts",
+      "sha256": "103739CA818A92EAE506A883C085F4C4656D51B0183D13DCB45D5B8FBFE459AF"
+    },
+    {
+      "path": "src\\main.tsx",
+      "sha256": "6D64EF738D4185C22B804F5EC27EC5ADC76D4C90690C91B06557D82961DEFA57"
+    },
+    {
+      "path": "src\\services\\tauriService.ts",
+      "sha256": "50D91EC4385C56E7D580430ED0D9383A72DFDF76A3C533D4FF49B068CA249681"
+    },
+    {
+      "path": "src\\stores\\connectionStore.ts",
+      "sha256": "E24EB80519693F76A3FB519201B542BB6D5FFEDEBA84DB628699DBA37BA9804E"
+    },
+    {
+      "path": "src\\stores\\editorStore.ts",
+      "sha256": "40497CBB76AC8C05367BD616FED528B4BF1AF252E78EB9415248595BB43C0B75"
+    },
+    {
+      "path": "src\\stores\\gridDraftStore.ts",
+      "sha256": "ED2B42B832AE3C31D4A06A3123F308117B0196B2172021AC2CA5AA3F51AE5511"
+    },
+    {
+      "path": "src\\stores\\themeStore.ts",
+      "sha256": "7BCE3E9EDA78C0D2E45E63416D71E5553713FD20142E223E999AB108BF359CC6"
+    },
+    {
+      "path": "src\\stores\\workspaceStore.ts",
+      "sha256": "7FDD942F5CD5E8B59FCF942C697A516D9CE730A9C097D7AB933FDD0876BD5B1C"
+    },
+    {
+      "path": "src\\types\\commitReceipt.ts",
+      "sha256": "0787ED69ACBAEF9553FA57F0FBE74E1C3678A96D5CDFBD533A22987E10AE70CC"
+    },
+    {
+      "path": "src\\types\\credential.ts",
+      "sha256": "0F1625B539C40C4CCFFE8B98773ECACEFEB9D884D6E7D4C50D132579827FDEDC"
+    },
+    {
+      "path": "src\\types\\database.ts",
+      "sha256": "AD365DA12589820074144D53DFEA3E56FF3A6B5011B84425DBFAACE37244C249"
+    },
+    {
+      "path": "src\\types\\dataset.ts",
+      "sha256": "F07B97677FF048A6B909FB8E898F45155CE2DDD2B58E2B49D6B53C193CA3F57F"
+    },
+    {
+      "path": "src\\types\\importJob.ts",
+      "sha256": "239E4B73337E9AE3D78D59483418124A6F71C4550583FFEE516489FA6E9E2703"
+    },
+    {
+      "path": "src\\types\\resultContext.ts",
+      "sha256": "EFCEF89248EB9CFB3B715AE7C8AAD193CBA35CEFA26DBF1F408A3254DA99C123"
+    },
+    {
+      "path": "src\\types\\task.ts",
+      "sha256": "6FD65594D537B8FFC9FD0B394243A35C185DA7143DA756FFC8344C9B0795EFDE"
+    },
+    {
+      "path": "src\\types\\typedValue.ts",
+      "sha256": "DAD9D4E6EA6EEE9526050A295BB4878B0B60BA9232B5E40C5B27AB7513E34535"
+    },
+    {
+      "path": "tests\\changeset.test.ts",
+      "sha256": "9C99DDEC1E5AD4C83982E5F058BC8172A06849DBBB93CA6A82870F1F3408B8D5"
+    },
+    {
+      "path": "tests\\commitReceipt.test.ts",
+      "sha256": "B7A9E84184035582B69B87A8F052F6903EF5A9AA7105597D4BA634AA2C831A83"
+    },
+    {
+      "path": "tests\\credentialStatus.test.tsx",
+      "sha256": "58FF535E82CA1078C1604F0C0CBA03B263DF27BFE188CDEAA66CFE158992C2A4"
+    },
+    {
+      "path": "tests\\datasetController.test.ts",
+      "sha256": "43E41D8004C768D4E43D37600BC03E9C60BCA09D515E34DA5D65D6CE0E267FC6"
+    },
+    {
+      "path": "tests\\datasetPage.component.test.tsx",
+      "sha256": "C1BD20671A8F7A3A37F07967A5F38D7806A3AAE61976E32B22F51AE4EC0CA30E"
+    },
+    {
+      "path": "tests\\ddlIdentity.test.ts",
+      "sha256": "27FE4FE6A08B3645C84BFD53399E8E4154D01E56301CDDF2ECE4AB22D7290C7C"
+    },
+    {
+      "path": "tests\\exportJob.component.test.tsx",
+      "sha256": "395435C2A6C7AEC6240D5827F241B3601611CDD7C9BCF97B5D8DE71DE2EAA26F"
+    },
+    {
+      "path": "tests\\fixtures\\plain-query-integers.json",
+      "sha256": "CA59354D571BD55A7AB3F5877CA8A3B92026BA5DD21D6D666F9AC24E1ED523EF"
+    },
+    {
+      "path": "tests\\gridCellInput.test.ts",
+      "sha256": "E65B8AB2E5B655660680BF86CECAC3AF4A9F808BA4FA70E0FB2A7A02445484B9"
+    },
+    {
+      "path": "tests\\gridDrafts.component.test.tsx",
+      "sha256": "D93AFC66794201A7E51CEFA9B7A6FD519A155B65EFB30FB8DD96FBD9DFF5C162"
+    },
+    {
+      "path": "tests\\gridDrafts.test.ts",
+      "sha256": "385445EBB7CE9104EBDC626C0D244926DBCC08FD9357D17370E21E87B451C494"
+    },
+    {
+      "path": "tests\\gridIdentity.test.ts",
+      "sha256": "8350ED9525CB5F52DD35D2E163615EB2C69C239B2B57C9E4DCA3B9E1070108C1"
+    },
+    {
+      "path": "tests\\importJobLifecycle.component.test.tsx",
+      "sha256": "F93390D837A778AF0C56AE726D43020D302E4450B1A6C219097F3CA60F9EB8AF"
+    },
+    {
+      "path": "tests\\metadataCache.test.ts",
+      "sha256": "5ABE3B8F8E4416D2E0A83B167CC8BF1F4DB9A5B80798A74DFD8E2B5E299A47EF"
+    },
+    {
+      "path": "tests\\metadataNavigation.component.test.tsx",
+      "sha256": "211A14DF9A9293EAD4773B923466945D89051A4DB0448FC57C2EDD7E9F5CC5C7"
+    },
+    {
+      "path": "tests\\metadataStructure.component.test.tsx",
+      "sha256": "5914101E6C7B109DC678CF7BF421614B28923BF01CB8A42DEABF157F4E0ACF00"
+    },
+    {
+      "path": "tests\\metadataTree.component.test.tsx",
+      "sha256": "54BC294076B059A1B41C577DFBDDD238301788AE57E310A96E7A78E9BF29815F"
+    },
+    {
+      "path": "tests\\objectIdentity.test.ts",
+      "sha256": "07C7A0D3176CB30052DEB153CF485B68F5F55DAA1101416A409E69C3E379EC31"
+    },
+    {
+      "path": "tests\\plainQueryIntegers.component.test.tsx",
+      "sha256": "407A34296C9D81763D0EEE7DD3EA7387E70783BD6AD97303B00C59EC7D943DC6"
+    },
+    {
+      "path": "tests\\queryActions.test.ts",
+      "sha256": "FFD5DAA70B933B0D86E45673912CB0237FAFE24F5A0A1F7D1021D917663A2538"
+    },
+    {
+      "path": "tests\\queryBudget.component.test.tsx",
+      "sha256": "DD2021CF7F7967E6DFF3CEA31883E9162DA058CA4A107187A5706D21C0AF904F"
+    },
+    {
+      "path": "tests\\resultContext.test.ts",
+      "sha256": "87E302BD6BE9CA6419016B6735F4682F7F6BE16EB4A0B00CB0F42AB195A7F0FB"
+    },
+    {
+      "path": "tests\\resultContextLifecycle.test.ts",
+      "sha256": "F728EFE6270D92BE3CA8C7435098A84E7DD8023F993017E43C7C9D893366A804"
+    },
+    {
+      "path": "tests\\sqlTable.test.ts",
+      "sha256": "BA1F3639E7247AB9B59FFE3F7DE7DA09F9592E7FF41D052DE0E9DA9A52288394"
+    },
+    {
+      "path": "tests\\tableNavigation.component.test.tsx",
+      "sha256": "EEDE35C71E33D038A83005EB46A9D14266DE30D77F55291301886108690C1E27"
+    },
+    {
+      "path": "tests\\tablePaging.test.ts",
+      "sha256": "8D4970FB53ABBA3054BB1F76A0E7C80A7EE55B6443AD4C03A06E0DC8BC766D0D"
+    },
+    {
+      "path": "tests\\typedGrid.component.test.tsx",
+      "sha256": "9FC8027F753D796D0F6C52CF961F3122C036EA42FA33E9134D9ED71B8D6B828B"
+    },
+    {
+      "path": "tests\\typedValue.test.ts",
+      "sha256": "F45732007EE6E7B94AF67FB4AF27669B70AF2DB763A41B6BEE09C491723C5A32"
+    }
+  ],
+  "cleanup": {
+    "CompletedUtc": "2026-10-21T00:46:34.9321537Z",
+    "GracefulDatabaseStop": true,
+    "OwnedProcessesRemaining": 0,
+    "IsolatedKeychainEntryRemoved": true,
+    "Removed": [
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-8f1d11044d244a05a084f95b72747cff",
+        "Bytes": 3197907013,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\sqlink-p2-closeout-bcb0e5db938144edad42e4ec37471936",
+        "Bytes": 3359549250,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-desktop-bin",
+        "Bytes": 31844864,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Roaming\\com.sqlconnect.acceptance.p2.b5bb9322f6284cd0b893d860969eafa4",
+        "Bytes": 5376,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Local\\com.sqlconnect.acceptance.p2.b5bb9322f6284cd0b893d860969eafa4",
+        "Bytes": 77332724,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-desktop-sqlite.db",
+        "Bytes": 36864,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-final-bin\\SQLink.exe.preview-stack-failed",
+        "Bytes": 31842304,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p2-closeout-final-bin\\SQLink.exe.layout-overflow",
+        "Bytes": 31844864,
+        "ExistsAfter": false
+      }
+    ],
+    "FreedBytes": 6730363259,
+    "ByteMeasurement": "删除前文件 Length 合计，不是磁盘空闲空间差值。",
+    "OtherProjectsUntouched": true
+  },
+  "merge": {
+    "completedUtc": "2026-10-21 00:52:56 UTC",
+    "repository": "Rick-C423/sqlink",
+    "pullRequest": "https://github.com/Rick-C423/sqlink/pull/1",
+    "merged": true,
+    "mergeMethod": "merge",
+    "expectedHead": "db25cdcfbb42fadbfcce082c6677ead7f6335d77",
+    "mergeCommit": "67aa8bfd4594097a20683733f0d445daca184ec8",
+    "mainCommit": "67aa8bfd4594097a20683733f0d445daca184ec8",
+    "tree": "207e3a49b2c220f9557b32ccc0ad44e4d9dc3781",
+    "mergedTreeMatchesValidatedTree": true,
+    "preMergeCI": {
+      "runId": 39522425489,
+      "conclusion": "success"
+    },
+    "postMergeCI": {
+      "runId": 39523850192,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Rick-C423/sqlink/actions/runs/39523850192"
+    },
+    "readiness": {
+      "localRemoteSourceTestConfigurationFilesMatched": 170,
+      "validatedSourceFilesUnchanged": 162,
+      "blockingReviews": 0,
+      "unresolvedReviewThreads": 0
+    },
+    "local": {
+      "head": "53abb8f53be5a2513482d0118787eabba83d4280",
+      "originMain": "67aa8bfd4594097a20683733f0d445daca184ec8",
+      "operation": "仅 git fetch，保留本地 HEAD、index、工作区文件和独立稿",
+      "branchRetained": true,
+      "snapshotPhase": "合并刚完成、尚未本地快进时的历史记录，后续状态见 localSynchronization"
+    },
+    "userAuthorization": "用户明确授权无阻断时合并并提交；没有据此声明用户已实际验收最终 EXE。",
+    "localSynchronization": {
+      "headAfterFastForward": "67aa8bfd4594097a20683733f0d445daca184ec8",
+      "filesByteIdenticalToBeforeSynchronization": 213,
+      "publishedDuplicatesCleared": 165,
+      "backupRetained": ".zcode\\p2-local-sync-b5190c515a244e118655678aadff0284",
+      "stashRetained": "8d904319e56e18754bead6a20e130dc1bc600d29",
+      "method": "限定路径暂存保护后正常快进；原文件逐字节核对保留；未重置、未清理。",
+      "textEvidenceSubmission": "补交8份后补验收文本；截图和用户独立稿仍仅保留本地。",
+      "userExecutableAcceptance": false
+    }
+  }
+}

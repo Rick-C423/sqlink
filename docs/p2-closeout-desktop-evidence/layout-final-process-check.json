@@ -1,0 +1,10 @@
+{
+  "CapturedUtc": "2026-10-21T00:45:36.2167552Z",
+  "BinarySha256": "FA85E67982408ADB22DADBAF684C78361857D9B343A5978F180140EAE64004E6",
+  "InspectedPids": [
+    28408,
+    50652
+  ],
+  "RemainingProcesses": [],
+  "ApplicationErrorEventsAfterLayoutStart": []
+}
