@@ -1,11 +1,25 @@
+pub mod atomic_export;
+pub mod changeset;
 pub mod commands;
+pub mod commit;
+pub mod commit_receipt;
 pub mod database;
+pub mod dataset;
+pub mod export;
 pub mod history;
+pub mod import_jobs;
 pub mod logging;
 pub mod mcp;
 pub mod mcp_settings;
+pub mod metadata;
 pub mod models;
+pub mod query_tasks;
+pub mod result_context;
+pub mod session;
 pub mod store;
+pub mod table_result;
+pub mod task_registry;
+pub mod typed_value;
 
 use tauri::Manager;
 
@@ -17,6 +31,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 连接管理
             commands::connection::connection_test,
+            commands::connection::credential_health,
             commands::connection::connection_create,
             commands::connection::connection_disconnect,
             commands::connection::connection_list,
@@ -29,13 +44,29 @@ pub fn run() {
             // 查询
             commands::query::query_execute,
             commands::query::query_cancel,
+            commands::query::task_get,
+            commands::query::connection_session_capabilities,
             commands::query::query_execute_batch,
+            commands::query::query_apply_grid_edits,
+            commands::query::table_read_page,
+            commands::query::table_read_dataset_page,
+            commands::query::table_count,
+            commands::query::table_task_cancel,
+            commands::query::import_cancel,
+            commands::query::result_context_validate,
+            commands::query::result_context_release,
+            commands::query::changeset_validate,
+            commands::query::changeset_commit,
+            commands::query::changeset_receipt,
             commands::query::table_export_csv,
+            commands::query::export_cancel,
             // Schema
             commands::query::schema_get_databases,
             commands::query::schema_get_database_infos,
             commands::query::schema_get_tables,
             commands::query::schema_get_columns,
+            commands::query::schema_get_table_metadata,
+            commands::query::schema_execute_ddl,
             commands::query::schema_resolve_table,
             commands::query::schema_get_indexes,
             commands::query::schema_get_foreign_keys,
@@ -51,6 +82,9 @@ pub fn run() {
             commands::query::schema_get_current_user,
             // SQL 转储导入
             commands::import::sql_import_file,
+            commands::import::sql_import_preview,
+            commands::import::sql_import_execute,
+            commands::import::sql_import_receipt,
             commands::import::sql_dump_file,
             // 查询历史
             commands::history::history_list,

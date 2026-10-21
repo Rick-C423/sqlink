@@ -62,14 +62,10 @@ for (const [driverType, target, id, value] of [
   ["sqlite", '"other.schema"."user.name"', '"id"', '"value"'],
   ["mssql", "[target.db].[other.schema].[user.name]", "[id]", "[value]"],
 ]) {
-  test(`${driverType} 的 UPDATE、DELETE、INSERT 使用同一个完整目标`, () => {
+  test(`${driverType} 旧网格 SQL 生成入口失败关闭`, () => {
     const context: EditContext = {
       connectionId: "A", database: "target.db", schema: "other.schema", table: "user.name", driverType, primaryKeys: ["id"],
     };
-    assert.deepEqual(buildEditStatements(result, context, { "0:1": "新值", "1:1": "忽略" }, [{ 0: "3", 1: "新增" }], new Set([1])), [
-      `UPDATE ${target} SET ${value} = '新值' WHERE ${id} = '1';`,
-      `DELETE FROM ${target} WHERE ${id} = '2';`,
-      `INSERT INTO ${target} (${id}, ${value}) VALUES ('3', '新增');`,
-    ]);
+    assert.throws(() => buildEditStatements(result, context, { "0:1": "新值", "1:1": "忽略" }, [{ 0: "3", 1: "新增" }], new Set([1])), /只读/);
   });
 }

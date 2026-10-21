@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ColumnInfo, EditContext, QueryResult } from "@/types/database";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DatasetController } from "@/lib/datasetController";
+import { EditContext, MetadataSnapshot, QueryResult } from "@/types/database";
+import { metadataCache } from "@/lib/metadataCache";
 import { tauriService } from "@/services/tauriService";
 import { quoteIdent, sqlLiteral, commonDataTypes } from "@/lib/utils";
 import { quoteTable, tableParts } from "@/lib/sqlTable";
+import { buildPageSql } from "@/lib/tablePaging";
+import { attachResultContext, formatResultContextError, retireResultContext } from "@/lib/resultContext";
+import { guardGridDraft, tableDraftKey, useGridDraftStore } from "@/stores/gridDraftStore";
+import type { ControlledTableReadRequest, ResultContext } from "@/types/resultContext";
 import { buildAlterStatements, ColumnDraft, DefaultKind, FkDraft, IndexDraft } from "@/lib/ddl";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { DataGrid, GridSort } from "@/components/result/DataGrid";
@@ -15,6 +21,7 @@ import type { TableSubTab } from "@/stores/workspaceStore";
 interface TableViewProps {
   connectionId: string;
   database: string;
+  schema?: string;
   table: string;
   /** 视图等只读对象：禁用网格编辑 */
   readonly?: boolean;
@@ -26,15 +33,16 @@ interface TableViewProps {
 
 type SubTab = TableSubTab;
 
-/** 表视图：数据（可编辑/删除/新增） + 结构（可编辑的表结构设计器） */
-export function TableView({ connectionId, database, table, initialSubTab, subTabNonce }: TableViewProps) {
+/** 表视图：后端授权的受控数据浏览与表结构设计器。 */
+export function TableView({ connectionId, database, schema, table, readonly, initialSubTab, subTabNonce }: TableViewProps) {
   const t = useT();
   const [subTab, setSubTab] = useState<SubTab>(initialSubTab ?? "data");
+  const draftKey = tableDraftKey(connectionId, database, table, schema);
 
   // tab 已处于打开状态时，右键「查数据 / 编辑结构」通过 nonce 驱动子页切换
   useEffect(() => {
-    if (subTabNonce !== undefined && initialSubTab) {
-      setSubTab(initialSubTab);
+    if (subTabNonce !== undefined && initialSubTab && initialSubTab !== subTab) {
+      void guardGridDraft(draftKey).then((allowed) => { if (allowed) setSubTab(initialSubTab); });
     }
     // 只在 nonce 变化时同步，用户手动切换子页不受影响
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,78 +60,27 @@ export function TableView({ connectionId, database, table, initialSubTab, subTab
                 ? "border-blue-500 text-blue-600 font-medium"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
-            onClick={() => setSubTab(st)}
+            onClick={async () => { if (st !== subTab && await guardGridDraft(draftKey)) setSubTab(st); }}
           >
             {st === "data" ? t("tableView.data") : t("tableView.structure")}
           </button>
         ))}
         <span className="ml-auto text-xs text-muted-foreground pr-2">
-          {database} / {table}
+          {[database, schema, table].filter(Boolean).join(" / ")}
         </span>
       </div>
 
       {subTab === "data" ? (
-        <TableData connectionId={connectionId} database={database} table={table} />
+        <TableData connectionId={connectionId} database={database} schema={schema} table={table} readonly={readonly} />
       ) : (
-        <TableStructure connectionId={connectionId} database={database} table={table} />
+        <TableStructure connectionId={connectionId} database={database} schema={schema} table={table} />
       )}
     </div>
   );
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
-
-/**
- * 构造表数据分页 SQL。
- *
- * 排序必须下推到数据库（ORDER BY）：网格数据按页拉取，内存排序只能
- * 作用于当前页。SQL Server 不使用 2012 才引入的 OFFSET/FETCH，避免
- * 旧版本或低兼容级别数据库报「OFFSET 附近有语法错误」。ROW_NUMBER
- * 从 SQL Server 2005 起可用。
- */
-function buildPageSql(
-  driverType: string,
-  table: string,
-  where: string,
-  page: number,
-  pageSize: number,
-  columns: ColumnInfo[],
-  sort: GridSort | null
-): string {
-  const offset = (page - 1) * pageSize;
-  if (driverType !== "sqlserver" && driverType !== "mssql") {
-    const orderBy = sort
-      ? ` ORDER BY ${quoteIdent(sort.key, driverType)} ${sort.direction.toUpperCase()}`
-      : "";
-    return `SELECT * FROM ${table}${where}${orderBy} LIMIT ${pageSize} OFFSET ${offset}`;
-  }
-
-  const rowNumber = quoteIdent("__sqlconnect_row_number", driverType);
-  const pageAlias = quoteIdent("__sqlconnect_page", driverType);
-  const primaryKeys = columns.filter((column) => column.isPrimaryKey);
-  // 排序列在前，主键做平级断路器让 ROW_NUMBER 稳定（分页不重不漏）；
-  // 无排序时保持原行为
-  const orderByParts: string[] = [];
-  if (sort) {
-    orderByParts.push(`${quoteIdent(sort.key, driverType)} ${sort.direction.toUpperCase()}`);
-  }
-  if (primaryKeys.length > 0) {
-    orderByParts.push(...primaryKeys.map((column) => quoteIdent(column.name, driverType)));
-  } else if (!sort) {
-    orderByParts.push("(SELECT 1)");
-  }
-  const orderBy = orderByParts.join(", ");
-  const selectedColumns = columns
-    .map((column) => `${pageAlias}.${quoteIdent(column.name, driverType)}`)
-    .join(", ");
-
-  return `SELECT ${selectedColumns} FROM (` +
-    `SELECT *, ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS ${rowNumber} ` +
-    `FROM ${table}${where}` +
-    `) AS ${pageAlias} ` +
-    `WHERE ${pageAlias}.${rowNumber} BETWEEN ${offset + 1} AND ${offset + pageSize} ` +
-    `ORDER BY ${pageAlias}.${rowNumber}`;
-}
+let filteredTaskSequence = Date.now() * 1000;
 
 // ---------- 行筛选 ----------
 
@@ -181,55 +138,173 @@ function escapeLikeValue(v: string): string {
   return v.replace(/'/g, "''");
 }
 
-export function TableData({ connectionId, database, table, readonly }: TableViewProps) {
+export function TableData({ connectionId, database, schema, table, readonly }: TableViewProps) {
   const t = useT();
+  const draftKey = tableDraftKey(connectionId, database, table, schema);
   const [result, setResult] = useState<QueryResult | undefined>();
   const [editContext, setEditContext] = useState<EditContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [displayPage, setDisplayPage] = useState(1);
+  const [jumpPage, setJumpPage] = useState("");
   const [pageSize, setPageSize] = useState(20);
   // 排序下推数据库：只排当前页没有意义，翻页/筛选后仍保持该排序
   const [sort, setSort] = useState<GridSort | null>(null);
   const [totalRows, setTotalRows] = useState<number | null>(null);
+  const [totalText, setTotalText] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [paginationMode, setPaginationMode] = useState("offset");
+  const [paginationFallback, setPaginationFallback] = useState<string | null>(null);
+  const [counting, setCounting] = useState(false);
+  const [countError, setCountError] = useState<string | null>(null);
+  const [cancelRequested, setCancelRequested] = useState(false);
+  const [canCancel, setCanCancel] = useState(false);
+  const rawTasks = useRef(new Map<string, number>());
+  const filteredCountSql = useRef<string | null>(null);
   // 筛选：filters 是草稿，appliedFilters 才进入查询（点"应用"或回车生效）
   const [filters, setFilters] = useState<FilterRow[]>([]);
   const [appliedFilters, setAppliedFilters] = useState<FilterRow[]>([]);
   const [colNames, setColNames] = useState<string[]>([]);
   const loadSequence = useRef(0);
-  const mounted = useRef(false);
+  const currentResult = useRef<QueryResult>();
+  const currentSpec = useRef("");
+  const connectionEpoch = useConnectionStore((state) => state.connectionEpochs[connectionId] ?? 0);
+  const viewSource = JSON.stringify([connectionId, connectionEpoch, database, schema ?? null, table]);
+  const acceptedSource = useRef("");
+
+  const retire = useCallback((previous: QueryResult | undefined) => {
+    void retireResultContext(previous?.resultContext, Object.values(useGridDraftStore.getState().drafts),
+      (resultId, revision) => tauriService.releaseResultContext(resultId, revision));
+  }, []);
+  const dataset = useMemo(() => {
+    const cancel = async (taskId: string) => {
+      const queryId = rawTasks.current.get(taskId);
+      if (queryId !== undefined) await tauriService.cancelQuery(connectionId, queryId, taskId);
+      else await tauriService.cancelTableTask(connectionId, taskId);
+    };
+    return new DatasetController({ cancelPage: cancel, cancelCount: cancel, retire });
+  }, [connectionId, retire]);
+  useEffect(() => { dataset.activate(); return () => dataset.dispose(); }, [dataset]);
+  useEffect(() => {
+    let current = true;
+    setCanCancel(false);
+    void tauriService.getSessionCapabilities(connectionId).then((capabilities) => {
+      if (current) setCanCancel(capabilities.cancellation);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [connectionId, connectionEpoch]);
+
+  // 请求依赖变化只作废请求；只有真正卸载才释放当前显示的干净结果。
+  useEffect(() => () => {
+    loadSequence.current++;
+    retire(currentResult.current);
+    currentResult.current = undefined;
+  }, [retire]);
+
+  // 同 ID 的断开与重连也必须使旧结果失效；脏草稿由 store 继续固定保留。
+  useEffect(() => {
+    loadSequence.current++;
+    retire(currentResult.current);
+    currentResult.current = undefined;
+    setResult(undefined);
+    setEditContext(null);
+    setTotalRows(null);
+    setTotalText(null); setHasMore(false); setCountError(null); setCounting(false);
+    setColNames([]);
+    setLoading(false);
+    setError(null);
+  }, [connectionId, connectionEpoch, retire]);
 
   const driverType =
     useConnectionStore.getState().saved.find((c) => c.id === connectionId)?.driverType ??
     "mysql";
 
-  const load = useCallback(async (source?: EditContext) => {
+  const load = useCallback(async (source?: EditContext, afterCommit = false, force = false) => {
+    const connectionState = useConnectionStore.getState();
+    const requestEpoch = connectionEpoch;
+    // epoch 0 允许首次读取；显式断开以后只能在明确恢复 live 后发起读取。
+    if ((connectionState.connectionEpochs[connectionId] ?? 0) !== requestEpoch ||
+      (requestEpoch > 0 && !connectionState.liveIds.has(connectionId))) {
+      if (afterCommit) throw new Error("连接会话已变化，请恢复连接后重试读取。");
+      return;
+    }
     const sequence = ++loadSequence.current;
+    const isCurrent = () => sequence === loadSequence.current &&
+      (useConnectionStore.getState().connectionEpochs[connectionId] ?? 0) === requestEpoch;
     setLoading(true);
     setError(null);
+    setCounting(false); setCancelRequested(false);
+    const sourceKey = JSON.stringify([connectionId, requestEpoch, source?.database ?? database, source?.schema ?? schema, source?.table ?? table, pageSize, sort, appliedFilters]);
+    if (currentSpec.current !== sourceKey || afterCommit || force) {
+      setTotalRows(null); setTotalText(null); setCountError(null);
+      currentSpec.current = sourceKey;
+    }
+    const ticket = dataset.beginPage(sourceKey, page, afterCommit || force);
     const where = buildWhere(appliedFilters, driverType);
     // SQL Server 的 COUNT(*) 返回 int，表超过 21 亿行会溢出（错误 8115）；用 COUNT_BIG 返回 bigint
     const countExpr =
       driverType === "sqlserver" || driverType === "mssql" ? "COUNT_BIG(*)" : "COUNT(*)";
     try {
+      if (appliedFilters.length === 0) {
+        const request: ControlledTableReadRequest = {
+          protocolVersion: 1, connectionId, database: source?.database ?? database,
+          tableParts: source ? tableParts(source) : tableParts({ driverType, database, schema, table }), page, pageSize,
+          sort: sort ? { column: sort.key, direction: sort.direction } : null,
+        };
+        const response = await tauriService.readTablePage(request, { taskId: ticket.taskId, cursor: ticket.cursor });
+        if (!isCurrent()) {
+          void retireResultContext(response.context, [], (resultId, revision) => tauriService.releaseResultContext(resultId, revision));
+          if (afterCommit) throw new Error("刷新请求已失效，请重试读取。");
+          return;
+        }
+        let nextResult: QueryResult;
+        try {
+          nextResult = attachResultContext(response, request);
+        } catch (error) {
+          void retireResultContext(response.context, [], (resultId, revision) => tauriService.releaseResultContext(resultId, revision));
+          throw error;
+        }
+        if (!dataset.accept(ticket, nextResult, response.nextCursor)) return;
+        currentResult.current = nextResult;
+        acceptedSource.current = viewSource;
+        setDisplayPage(page);
+        setResult(nextResult);
+        if (response.totalRows !== null) {
+          setTotalRows(response.totalRows); setTotalText(String(response.totalRows));
+        }
+        setHasMore(response.hasMore ?? (response.totalRows !== null ? page * pageSize < response.totalRows : nextResult.rows.length === pageSize));
+        setPaginationMode(response.paginationMode ?? "offset");
+        setPaginationFallback(response.paginationFallbackReason ?? null);
+        filteredCountSql.current = null;
+        setColNames(response.table.columns.map((column) => column.name));
+        // 网格权限仅由受控结果的后端策略决定。
+        setEditContext(null);
+        return;
+      }
+      // 筛选沿用只读查询；在 P102 类型化绑定前不登记可信上下文。
       const metadata = await tauriService.resolveTable(
-        connectionId, source?.database ?? database, source ? tableParts(source) : [table]
+        connectionId, source?.database ?? database, source ? tableParts(source) : tableParts({ driverType, database, schema, table })
       );
-      if (sequence !== loadSequence.current) return;
+      if (!isCurrent()) return;
       const qt = quoteTable({ ...metadata, driverType });
       const cols = metadata.columns;
       // 使用同一份已解析身份构造分页、统计和保存目标。
       const countSql = `SELECT ${countExpr} AS cnt FROM ${qt}${where}`;
-      const dataPromise = tauriService.executeQuery(
-        connectionId, buildPageSql(driverType, qt, where, page, pageSize, cols, sort), database
-      );
-      const [countResult, queryResult] = await Promise.all([
-        tauriService.executeQuery(connectionId, countSql, database),
-        dataPromise,
-      ]);
-      if (sequence !== loadSequence.current) return;
-      const total = countResult.rows[0]?.values[0];
-      setTotalRows(typeof total === "number" ? total : null);
+      const dataSql = buildPageSql(driverType, qt, where, page, pageSize, cols, sort, 1);
+      const queryId = ++filteredTaskSequence;
+      rawTasks.current.set(ticket.taskId, queryId);
+      const rawResult = await tauriService.executeQuery(connectionId, dataSql, database, queryId, false, ticket.taskId);
+      if (!isCurrent()) return;
+      const { resultContext: _untrustedContext, rowHandles: _untrustedHandles, typedRows: _untrustedValues, ...rawPage } = rawResult;
+      const more = rawPage.rows.length > pageSize;
+      const queryResult = { ...rawPage, rows: rawPage.rows.slice(0, pageSize) };
+      if (!dataset.accept(ticket, queryResult)) return;
+      filteredCountSql.current = countSql;
+      setHasMore(more); setPaginationMode("offset"); setPaginationFallback("FILTERED_OFFSET");
+      currentResult.current = queryResult;
+      acceptedSource.current = viewSource;
+      setDisplayPage(page);
       setResult(queryResult);
       setColNames(cols.map((c) => c.name));
       if (!readonly && !queryResult.error && queryResult.columns.length > 0) {
@@ -245,31 +320,89 @@ export function TableData({ connectionId, database, table, readonly }: TableView
         setEditContext(null);
       }
     } catch (err) {
-      if (sequence === loadSequence.current) setError(String(err));
+      if (isCurrent()) setError(formatResultContextError(err));
+      if (afterCommit) throw err;
     } finally {
-      if (sequence === loadSequence.current) setLoading(false);
+      rawTasks.current.delete(ticket.taskId);
+      dataset.finishPage(ticket);
+      if (isCurrent()) setLoading(false);
     }
-  }, [connectionId, database, table, page, pageSize, sort, appliedFilters, driverType, readonly]);
-  const currentLoad = useRef(load);
-  currentLoad.current = load;
+  }, [connectionId, connectionEpoch, database, schema, table, page, pageSize, sort, appliedFilters, driverType, readonly, retire, dataset]);
+
+  const countRows = async () => {
+    if (!dataset.ownsResult(currentResult.current) || acceptedSource.current !== viewSource ||
+        (useConnectionStore.getState().connectionEpochs[connectionId] ?? 0) !== connectionEpoch) return;
+    const context = currentResult.current?.resultContext;
+    const sql = filteredCountSql.current;
+    if (!context && !sql) return;
+    const ticket = dataset.beginCount(context);
+    const epoch = connectionEpoch;
+    const current = () => dataset.isCountCurrent(ticket) &&
+      (useConnectionStore.getState().connectionEpochs[connectionId] ?? 0) === epoch;
+    setCounting(true); setCancelRequested(false); setCountError(null);
+    try {
+      let text: string;
+      if (context) {
+        const response = await tauriService.countTable({ protocolVersion: 1, resultId: context.resultId, revision: context.revision, taskId: ticket.taskId });
+        if (response.resultId !== context.resultId || response.revision !== context.revision ||
+          response.connectionId !== context.connectionId || response.connectionGeneration !== context.connectionGeneration) {
+          throw new Error("统计来源与当前结果不一致，请重新统计。");
+        }
+        text = response.totalRows;
+      } else {
+        const queryId = ++filteredTaskSequence;
+        rawTasks.current.set(ticket.taskId, queryId);
+        const response = await tauriService.executeQuery(connectionId, sql!, database, queryId, false, ticket.taskId);
+        const value = response.rows[0]?.values[0];
+        if (response.truncated || (typeof value !== "string" && typeof value !== "number")) throw new Error("统计未完整返回。");
+        text = String(value);
+      }
+      if (!/^(0|[1-9]\d*)$/.test(text)) throw new Error("统计结果不是有效的完整行数。");
+      if (!current()) return;
+      setTotalText(text);
+      const count = Number(text);
+      setTotalRows(Number.isSafeInteger(count) ? count : null);
+    } catch (error) { if (current()) setCountError(formatResultContextError(error)); }
+    finally { rawTasks.current.delete(ticket.taskId); if (current()) setCounting(false); dataset.finishCount(ticket); }
+  };
+
+  const cancelDatasetTask = async (kind: "page" | "count") => {
+    const sequence = loadSequence.current;
+    const epoch = connectionEpoch;
+    setCancelRequested(true);
+    try { await dataset.requestCancel(kind); }
+    catch (error) {
+      if (sequence === loadSequence.current && (useConnectionStore.getState().connectionEpochs[connectionId] ?? 0) === epoch) setCountError(formatResultContextError(error));
+    }
+  };
+
+  const goToPage = async (next: number) => {
+    if (!Number.isSafeInteger(next) || next < 1 || next > 4_294_967_295) {
+      setError("页码须为 1 至 4294967295 的整数。"); return;
+    }
+    if (!await guardGridDraft(draftKey)) return;
+    if (next === page) void load(); else setPage(next);
+  };
 
   /** 表头排序：回到第 1 页看排序后的最前数据 */
   const handleSortChange = useCallback((next: GridSort) => {
-    setSort(next);
-    setPage(1);
-  }, []);
+    void guardGridDraft(draftKey).then((allowed) => {
+      if (!allowed) return;
+      setSort(next);
+      setPage(1);
+    });
+  }, [draftKey]);
 
   useEffect(() => {
-    mounted.current = true;
     void load();
     return () => {
-      mounted.current = false;
       loadSequence.current++;
     };
   }, [load]);
 
   /** 应用草稿筛选：回到第 1 页重新查询 */
-  const applyFilters = (next: FilterRow[]) => {
+  const applyFilters = async (next: FilterRow[]) => {
+    if (!await guardGridDraft(draftKey)) return;
     setFilters(next);
     setAppliedFilters(next.filter((f) => f.column));
     setPage(1);
@@ -278,12 +411,11 @@ export function TableData({ connectionId, database, table, readonly }: TableView
   const updateFilter = (i: number, patch: Partial<FilterRow>) =>
     setFilters((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
 
-  const handleApplyEdits = async (statements: string[]) => {
-    if (!editContext) throw new Error("结果来源不可用，请刷新后重新编辑");
-    const source = editContext;
-    await tauriService.executeBatch(source.connectionId, source.database, statements);
-    if (mounted.current) await currentLoad.current(source);
-  };
+  const refreshCommitted = useCallback(async (source: ResultContext) => {
+    if (source.connectionId !== connectionId) throw new Error("刷新来源与原连接不一致。");
+    await load({ connectionId, database: source.source.database, schema: source.source.schema,
+      table: source.source.table, primaryKeys: [], driverType }, true);
+  }, [connectionId, driverType, load]);
 
   const totalPages =
     totalRows !== null ? Math.max(1, Math.ceil(totalRows / pageSize)) : 1;
@@ -371,45 +503,50 @@ export function TableData({ connectionId, database, table, readonly }: TableView
 
       <div className="flex-1 min-h-0">
         <DataGrid
+          draftKey={draftKey}
+          readOnlyReason={readonly ? "视图结果为只读。" : loading ? "正在读取页面，请等待读取完成。" : result && !dataset.ownsResult(result) ? "当前显示为旧页面，身份已失效，请刷新成功后再编辑。" : undefined}
           result={result}
           editContext={editContext}
-          onApplyEdits={handleApplyEdits}
+          onRefreshCommitted={refreshCommitted}
           sortState={sort}
           onSortChange={handleSortChange}
         />
       </div>
       {/* 底部分页栏：刷新固定左下，分页控件右对齐 */}
-      <div className="flex items-center gap-2 px-3 py-1 border-t text-xs text-muted-foreground">
-        <Button variant="ghost" size="sm" className="h-6" onClick={() => void load()} disabled={loading}>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-1 border-t text-xs text-muted-foreground">
+        <Button variant="ghost" size="sm" className="h-6" onClick={async () => { if (await guardGridDraft(draftKey)) void load(undefined, false, true); }} disabled={loading}>
           {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           <span className="ml-1">{t("common.refresh")}</span>
         </Button>
-        <span>
-          {totalRows !== null
-            ? t("tableView.totalRows", { count: totalRows.toLocaleString() })
-            : "…"}
-        </span>
+        <span>{totalText !== null ? t("tableView.totalRows", { count: BigInt(totalText).toLocaleString() }) : "总行数未统计"}</span>
+        <Button variant="ghost" size="sm" disabled={loading || counting || !dataset.ownsResult(result)} onClick={() => void countRows()}>{counting ? "统计中…" : "统计总行数"}</Button>
+        {counting && <Button variant="outline" size="sm" disabled={!canCancel || cancelRequested} onClick={() => void cancelDatasetTask("count")}>{cancelRequested ? "已请求取消" : "取消统计"}</Button>}
+        {loading && <Button variant="outline" size="sm" disabled={!canCancel || cancelRequested} onClick={() => void cancelDatasetTask("page")}>{cancelRequested ? "已请求取消" : "取消读取"}</Button>}
+        {countError && <span className="text-red-600" role="status">{countError}</span>}
         <div className="ml-auto flex items-center gap-2">
-          <span>{t("tableView.pageInfo", { page, total: totalPages })}</span>
+          <span>{totalRows !== null ? t("tableView.pageInfo", { page: displayPage, total: totalPages }) : `第 ${displayPage} 页 · 总数未知`}</span>
+          <span className="text-muted-foreground" title={`${paginationFallback ? ({ KEYSET_SOURCE_NOT_BASE_TABLE: "该对象不是基础表。", KEYSET_NO_UNIQUE_PRIMARY_KEY: "没有可靠的完整主键。", KEYSET_NULLABLE_ORDER: "排序列允许空值。", KEYSET_ORDER_TYPE_UNSUPPORTED: "排序类型暂不支持安全游标。", FILTERED_OFFSET: "筛选结果使用偏移分页。" } as Record<string, string>)[paginationFallback] ?? "当前排序使用偏移分页。" : ""}各页与精确统计独立读取，并发修改可能使跨页重复或遗漏。`}>{paginationMode === "keyset" ? "游标续页" : "偏移分页"}</span>
           <button
             className="px-1.5 py-0.5 rounded border hover:bg-gray-100 disabled:opacity-40"
-            disabled={page <= 1 || loading}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={displayPage <= 1 || loading}
+            onClick={() => void goToPage(Math.max(1, displayPage - 1))}
           >
             {t("tableView.prevPage")}
           </button>
           <button
             className="px-1.5 py-0.5 rounded border hover:bg-gray-100 disabled:opacity-40"
-            disabled={page >= totalPages || loading}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={!hasMore || loading}
+            onClick={() => void goToPage(displayPage + 1)}
           >
             {t("tableView.nextPage")}
           </button>
           <select
             className="h-6 rounded border bg-background px-1 text-xs"
             value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
+            onChange={async (e) => {
+              const nextSize = Number(e.target.value);
+              if (!await guardGridDraft(draftKey)) return;
+              setPageSize(nextSize);
               setPage(1);
             }}
           >
@@ -419,6 +556,8 @@ export function TableData({ connectionId, database, table, readonly }: TableView
               </option>
             ))}
           </select>
+          <input aria-label="跳到页码" type="number" min="1" className="w-16 h-6 rounded border bg-background px-1" value={jumpPage} onChange={(event) => setJumpPage(event.target.value)} disabled={loading} />
+          <Button variant="outline" size="sm" disabled={loading || !jumpPage} onClick={() => void goToPage(Number(jumpPage))}>跳转</Button>
         </div>
       </div>
     </div>
@@ -427,7 +566,7 @@ export function TableData({ connectionId, database, table, readonly }: TableView
 
 type StructTab = "columns" | "indexes" | "fks";
 
-function TableStructure({ connectionId, database, table }: TableViewProps) {
+export function TableStructure({ connectionId, database, schema, table }: TableViewProps) {
   const t = useT();
   const [origCols, setOrigCols] = useState<ColumnDraft[]>([]);
   const [cols, setCols] = useState<ColumnDraft[]>([]);
@@ -441,24 +580,38 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showSql, setShowSql] = useState(false);
+  const [snapshot, setSnapshot] = useState<MetadataSnapshot | null>(null);
+  const loadSequence = useRef(0);
+  const connectionEpoch = useConnectionStore((state) => state.connectionEpochs[connectionId] ?? 0);
 
   const driverType =
     useConnectionStore.getState().saved.find((c) => c.id === connectionId)?.driverType ??
     "mysql";
   const isMysql = driverType === "mysql";
   const dataTypes = commonDataTypes(driverType);
+  const sourceKey = JSON.stringify([connectionId, connectionEpoch, database, schema ?? null, table, driverType]);
+  const currentSource = useRef(sourceKey);
+  const sourceSession = useRef(0);
+  if (currentSource.current !== sourceKey) sourceSession.current++;
+  currentSource.current = sourceKey;
+  const snapshotSource = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
+    const state = useConnectionStore.getState();
+    if (currentSource.current !== sourceKey || (state.connectionEpochs[connectionId] ?? 0) !== connectionEpoch ||
+        (connectionEpoch > 0 && !state.liveIds.has(connectionId))) return;
+    const sequence = ++loadSequence.current;
+    const isCurrent = () => currentSource.current === sourceKey && sequence === loadSequence.current &&
+      (useConnectionStore.getState().connectionEpochs[connectionId] ?? 0) === connectionEpoch;
     setLoading(true);
     setError(null);
     setNotice(null);
     try {
-      const [colInfos, idxInfos, fkInfos] = await Promise.all([
-        tauriService.getColumns(connectionId, database, table),
-        tauriService.getIndexes(connectionId, database, table),
-        tauriService.getForeignKeys(connectionId, database, table),
-      ]);
-      const colDrafts: ColumnDraft[] = colInfos.map((c) => ({
+      const metadata = await metadataCache.get({ connectionId, connectionEpoch, database, schema, table, category: "table-structure" },
+        () => tauriService.getTableMetadata(connectionId, database, tableParts({ driverType, database, schema, table })), refresh);
+      if (!isCurrent()) return;
+      if (metadata.connectionId !== connectionId) throw new Error("结构元数据的连接来源不一致。");
+      const colDrafts: ColumnDraft[] = metadata.target.columns.map((c) => ({
         name: c.name,
         dataType: c.dataType,
         nullable: c.nullable,
@@ -468,17 +621,23 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
         autoIncrement: (c.extra ?? "").toLowerCase().includes("auto_increment"),
         comment: c.comment ?? "",
       }));
-      const idxDrafts: IndexDraft[] = idxInfos.map((i) => ({
+      const formatColumns = (names: string[]) => names.map((name) => quoteIdent(name, driverType)).join(", ");
+      const idxDrafts: IndexDraft[] = metadata.indexes.map((i) => ({
         name: i.name,
-        columns: i.columns.join(", "),
+        columns: i.keyParts?.length ? i.keyParts.map((part) =>
+          `${part.column != null ? quoteIdent(part.column, driverType) : part.expression ?? "（表达式，详见定义）"}${part.descending ? " DESC" : ""}`).join(", ") : formatColumns(i.columns),
         isUnique: i.isUnique,
         isPrimary: i.isPrimary,
+        details: [i.includedColumns?.length ? `INCLUDE (${formatColumns(i.includedColumns)})` : "",
+          i.predicate ? `WHERE ${i.predicate}` : "", i.definition ?? ""].filter(Boolean).join("\n"),
       }));
-      const fkDrafts: FkDraft[] = fkInfos.map((f) => ({
+      const fkDrafts: FkDraft[] = metadata.foreignKeys.map((f) => ({
         name: f.name,
-        columns: f.columns.join(", "),
+        columns: formatColumns(f.columns),
         refTable: f.refTable,
-        refColumns: f.refColumns.join(", "),
+        refSchema: f.refSchema,
+        refDatabase: f.refDatabase,
+        refColumns: formatColumns(f.refColumns),
         onDelete: f.onDelete ?? "",
         onUpdate: f.onUpdate ?? "",
       }));
@@ -488,36 +647,59 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
       setIdxs(idxDrafts.map((i) => ({ ...i })));
       setOrigFks(fkDrafts);
       setFks(fkDrafts.map((f) => ({ ...f })));
+      snapshotSource.current = sourceKey;
+      setSnapshot(metadata);
     } catch (err) {
-      setError(String(err));
+      if (isCurrent()) setError(String(err));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [connectionId, database, table]);
+  }, [connectionId, connectionEpoch, database, schema, table, driverType, sourceKey]);
 
   useEffect(() => {
-    load();
+    snapshotSource.current = null;
+    setSnapshot(null);
+    setOrigCols([]); setCols([]); setOrigIdxs([]); setIdxs([]); setOrigFks([]); setFks([]);
+    setLoading(false); setSubmitting(false); setError(null); setNotice(null);
+    void load();
+    return () => { loadSequence.current++; };
   }, [load]);
 
   // 实时生成待执行的 DDL 语句（供预览与提交）
-  const statements = buildAlterStatements(driverType, table, origCols, cols, origIdxs, idxs, origFks, fks);
+  let statements: string[] = [];
+  let ddlError: string | null = null;
+  try {
+    if (snapshot && snapshotSource.current === sourceKey) statements = buildAlterStatements(driverType,
+      snapshot.target, origCols, cols, origIdxs, idxs, origFks, fks);
+  } catch (err) { ddlError = String(err); }
 
   const updateCol = (i: number, patch: Partial<ColumnDraft>) => {
     setCols((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
   };
 
   const handleSubmit = async () => {
-    if (statements.length === 0) return;
+    if (statements.length === 0 || !snapshot || snapshotSource.current !== sourceKey || submitting) return;
+    // 提交固定为生成草稿时的后端身份，不读取连接树的当前选择。
+    const frozenSnapshot = snapshot;
+    const frozenSource = sourceKey;
+    const frozenSession = sourceSession.current;
+    const frozenStatements = [...statements];
+    const isCurrent = () => currentSource.current === frozenSource && sourceSession.current === frozenSession &&
+      (useConnectionStore.getState().connectionEpochs[connectionId] ?? 0) === connectionEpoch;
     setSubmitting(true);
     setError(null);
     try {
-      await tauriService.executeBatch(connectionId, database, statements);
-      setNotice(t("tableView.ddlExecuted", { count: statements.length }));
-      await load();
+      await tauriService.executeDdl({ connectionId: frozenSnapshot.connectionId,
+        connectionGeneration: frozenSnapshot.connectionGeneration, database: frozenSnapshot.target.database,
+        tableParts: tableParts({ ...frozenSnapshot.target, driverType }), revision: frozenSnapshot.revision,
+        statements: frozenStatements });
+      if (!isCurrent()) return;
+      await load(true);
+      if (isCurrent()) setNotice(t("tableView.ddlExecuted", { count: frozenStatements.length }));
     } catch (err) {
-      setError(t("tableView.submitFailed", { error: String(err) }));
+      if (isCurrent()) setError(t("tableView.submitFailed", { error: String(err) }));
     } finally {
-      setSubmitting(false);
+      if (isCurrent()) setSubmitting(false);
     }
   };
 
@@ -555,17 +737,17 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
               <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowSql(!showSql)}>
                 {showSql ? t("tableView.hideSql") : t("tableView.previewSql")}
               </Button>
-              <Button size="sm" className="h-6 text-xs" onClick={handleSubmit} disabled={submitting}>
+              <Button size="sm" className="h-6 text-xs" onClick={handleSubmit} disabled={submitting || loading}>
                 {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
                 {t("grid.submit")}
               </Button>
-              <Button variant="outline" size="sm" className="h-6 text-xs" onClick={load} disabled={submitting}>
+              <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => void load(true)} disabled={submitting}>
                 <RotateCcw className="h-3 w-3 mr-1" />
                 {t("grid.discard")}
               </Button>
             </>
           )}
-          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={load} disabled={loading}>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => void load(true)} disabled={loading || submitting}>
             {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           </Button>
         </div>
@@ -581,6 +763,7 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
       {error && (
         <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">{error}</div>
       )}
+      {ddlError && <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">{ddlError}</div>}
       {notice && (
         <div className="px-3 py-1.5 bg-green-50 text-green-700 text-xs border-b border-green-200">{notice}</div>
       )}
@@ -819,7 +1002,9 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                         }
                       />
                     ) : (
-                      <span className="text-muted-foreground">{idx.columns}</span>
+                      <span className="text-muted-foreground whitespace-pre-wrap" title={idx.details}>
+                        {idx.columns}{idx.details && <small className="block">{idx.details}</small>}
+                      </span>
                     )}
                   </td>
                   <td className={cn(tdCls, "text-center")}>
@@ -950,15 +1135,18 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
                     </td>
                     <td className={tdCls}>
                       {fk.isNew ? (
-                        <input
-                          className={inputCls}
-                          value={fk.refTable}
-                          placeholder={t("tableView.thRefTable")}
-                          disabled={fk.deleted}
-                          onChange={(e) => updateFk({ refTable: e.target.value })}
-                        />
+                        <div className="flex flex-col gap-1">
+                          {(driverType === "mysql" || driverType === "mariadb" || driverType === "mssql" || driverType === "sqlserver") &&
+                            <input className={inputCls} value={fk.refDatabase ?? ""} placeholder="引用数据库（可选）" disabled={fk.deleted}
+                              onChange={(e) => updateFk({ refDatabase: e.target.value || undefined })} />}
+                          {driverType !== "mysql" && driverType !== "mariadb" &&
+                            <input className={inputCls} value={fk.refSchema ?? ""} placeholder="引用 schema（可选）" disabled={fk.deleted}
+                              onChange={(e) => updateFk({ refSchema: e.target.value || undefined })} />}
+                          <input className={inputCls} value={fk.refTable} placeholder={t("tableView.thRefTable")} disabled={fk.deleted}
+                            onChange={(e) => updateFk({ refTable: e.target.value })} />
+                        </div>
                       ) : (
-                        fk.refTable
+                        [fk.refDatabase, fk.refSchema, fk.refTable].filter(Boolean).map((part) => quoteIdent(part!, driverType)).join(".")
                       )}
                     </td>
                     <td className={tdCls}>
@@ -1010,12 +1198,12 @@ function TableStructure({ connectionId, database, table }: TableViewProps) {
 
       {/* 底栏：刷新固定左下 */}
       <div className="flex items-center gap-2 px-3 py-1 border-t text-xs text-muted-foreground">
-        <Button variant="ghost" size="sm" className="h-6" onClick={load} disabled={loading}>
+        <Button variant="ghost" size="sm" className="h-6" onClick={() => void load(true)} disabled={loading || submitting}>
           {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           <span className="ml-1">{t("common.refresh")}</span>
         </Button>
         <span className="text-muted-foreground/60">
-          {database} / {table}
+          {[database, schema, table].filter(Boolean).join(" / ")}
         </span>
       </div>
     </div>

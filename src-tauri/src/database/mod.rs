@@ -3,9 +3,12 @@ pub mod mssql;
 pub mod mysql;
 pub mod pool;
 pub mod postgres;
+pub mod result_budget;
 pub mod sqlite;
 
 use crate::models::*;
+use crate::session::{SessionCapabilities, SessionLease};
+use crate::typed_value::{TypedQueryResult, TypedValue};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -14,6 +17,26 @@ use std::sync::Arc;
 pub trait DatabaseDriver: Send + Sync {
     fn driver_type(&self) -> &'static str;
     fn is_connected(&self) -> bool;
+    /// 文件型数据库覆盖保护；由实际连接读取文件身份，不采信请求里的数据库标签。
+    async fn validate_export_path(&self, path: &str) -> Result<(), DatabaseError> {
+        let _ = path;
+        Ok(())
+    }
+    fn session_capabilities(&self) -> SessionCapabilities {
+        SessionCapabilities {
+            cancellation: false,
+            cancellation_reason: Some("该驱动尚未实现独占租约".into()),
+            exclusive_session: false,
+            reset_policy: "unsupported".into(),
+        }
+    }
+    async fn lease_session(
+        &self,
+        database: Option<&str>,
+    ) -> Result<Box<dyn SessionLease>, DatabaseError> {
+        let _ = database;
+        Err(DatabaseError::Unknown("该驱动尚未实现独占租约".into()))
+    }
 
     /// query_id 用于查询取消（KILL QUERY）；database 为查询上下文库（执行前 USE）
     async fn query(
@@ -28,6 +51,30 @@ pub trait DatabaseDriver: Send + Sync {
         database: Option<&str>,
         query_id: Option<u64>,
     ) -> Result<QueryResult, DatabaseError>;
+    /// 仅供后端受控服务使用。所有值必须走驱动参数协议，不接受前端 SQL。
+    async fn query_typed(
+        &self,
+        sql: &str,
+        params: &[TypedValue],
+        database: Option<&str>,
+    ) -> Result<TypedQueryResult, DatabaseError> {
+        let _ = (sql, params, database);
+        Err(DatabaseError::TypeError(
+            "该驱动尚不支持无损类型读取".into(),
+        ))
+    }
+    /// 单条参数化执行基础设施，不承诺多语句原子性；网格提交仍需独占租约和回执。
+    async fn execute_bound(
+        &self,
+        sql: &str,
+        params: &[TypedValue],
+        database: Option<&str>,
+    ) -> Result<u64, DatabaseError> {
+        let _ = (sql, params, database);
+        Err(DatabaseError::TypeError(
+            "该驱动尚不支持类型化参数绑定".into(),
+        ))
+    }
     async fn cancel_query(&self, query_id: u64) -> Result<(), DatabaseError>;
 
     async fn get_databases(&self) -> Result<Vec<String>, DatabaseError>;
@@ -103,11 +150,38 @@ pub trait DatabaseDriver: Send + Sync {
         database: Option<&str>,
         table: &str,
     ) -> Result<Vec<IndexInfo>, DatabaseError>;
+    async fn get_indexes_for(
+        &self,
+        target: &ResolvedTable,
+    ) -> Result<Vec<IndexInfo>, DatabaseError> {
+        let _ = target;
+        Err(DatabaseError::QueryError(
+            "METADATA_TARGET_UNSUPPORTED: 驱动尚不支持完整索引身份".into(),
+        ))
+    }
     async fn get_foreign_keys(
         &self,
         database: Option<&str>,
         table: &str,
     ) -> Result<Vec<ForeignKeyInfo>, DatabaseError>;
+    async fn get_foreign_keys_for(
+        &self,
+        target: &ResolvedTable,
+    ) -> Result<Vec<ForeignKeyInfo>, DatabaseError> {
+        let _ = target;
+        Err(DatabaseError::QueryError(
+            "METADATA_TARGET_UNSUPPORTED: 驱动尚不支持完整外键身份".into(),
+        ))
+    }
+    async fn get_view_definition_for(
+        &self,
+        target: &ResolvedTable,
+    ) -> Result<String, DatabaseError> {
+        let _ = target;
+        Err(DatabaseError::QueryError(
+            "METADATA_TARGET_UNSUPPORTED: 驱动尚不支持完整视图身份".into(),
+        ))
+    }
 
     /// 在一个事务里批量执行写语句（数据网格编辑提交用），返回总影响行数，失败整体回滚
     async fn execute_batch(
@@ -132,10 +206,63 @@ pub trait DatabaseDriver: Send + Sync {
         include_drop: bool,
         include_data: bool,
     ) -> Result<(String, u64), DatabaseError>;
+    async fn dump_table_for(
+        &self,
+        target: &ResolvedTable,
+        include_drop: bool,
+        include_data: bool,
+    ) -> Result<(String, u64), DatabaseError> {
+        if !matches!(self.driver_type(), "mysql" | "mariadb") {
+            return Err(DatabaseError::QueryError(
+                "EXPORT_TARGET_UNSUPPORTED: 驱动尚不支持完整转储身份".into(),
+            ));
+        }
+        self.dump_table(
+            Some(&target.database),
+            &target.table,
+            include_drop,
+            include_data,
+        )
+        .await
+    }
 
     async fn disconnect(&self) -> Result<(), DatabaseError>;
 
     fn escape_identifier(&self, identifier: &str) -> String;
+}
+
+/// 从实际会话取得默认库；旧名称接口不把 None 当作 public/dbo 或任意首库。
+pub async fn current_database<D: DatabaseDriver + ?Sized>(
+    driver: &D,
+    database: Option<&str>,
+) -> Result<String, DatabaseError> {
+    if let Some(database) = database.filter(|value| !value.is_empty()) {
+        return Ok(database.into());
+    }
+    let sql = match driver.driver_type() {
+        "sqlite" => return Ok("main".into()),
+        "mysql" | "mariadb" => "SELECT DATABASE()",
+        "postgres" => "SELECT current_database()",
+        "mssql" => "SELECT DB_NAME()",
+        _ => {
+            return Err(DatabaseError::QueryError(
+                "METADATA_DATABASE_UNKNOWN: 无法确定当前数据库".into(),
+            ))
+        }
+    };
+    driver
+        .query(sql, None, None)
+        .await?
+        .rows
+        .first()
+        .and_then(|row| row.values.first())
+        .and_then(Option::as_ref)
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            DatabaseError::QueryError("METADATA_DATABASE_UNKNOWN: 当前数据库不可用".into())
+        })
 }
 
 /// CSV 写出工具（手动转义：含逗号/引号/换行的值加双引号包裹）

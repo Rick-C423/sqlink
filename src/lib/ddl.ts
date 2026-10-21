@@ -1,4 +1,57 @@
 import { quoteIdent, sqlLiteral } from "./utils";
+import { quoteTable, tableParts } from "./sqlTable";
+
+export interface DdlTableIdentity { database: string; schema?: string | null; table: string }
+
+/** 名称中的逗号通过 SQL 标识符引用保留；不把引用内的逗号当分隔符。 */
+export function parseIdentifierList(input: string): string[] {
+  const result: string[] = [];
+  let offset = 0;
+  while (offset < input.length) {
+    while (/\s/.test(input[offset] ?? "") && offset < input.length) offset++;
+    const opening = input[offset];
+    let name = "";
+    if (opening === '"' || opening === "`" || opening === "[") {
+      const closing = opening === "[" ? "]" : opening;
+      offset++;
+      let closed = false;
+      while (offset < input.length) {
+        if (input[offset] === closing) {
+          if (input[offset + 1] === closing) { name += closing; offset += 2; continue; }
+          offset++; closed = true; break;
+        }
+        name += input[offset++];
+      }
+      if (!closed) throw new Error("列名引用未闭合，请使用完整的引用标识符。");
+      while (offset < input.length && /\s/.test(input[offset])) offset++;
+      if (offset < input.length && input[offset] !== ",") throw new Error("列名引用后只能使用逗号分隔。");
+    } else {
+      while (offset < input.length && input[offset] !== ",") name += input[offset++];
+      name = name.trim();
+      if (/[\[\]`"']/.test(name)) throw new Error("复杂列名请使用完整的引用标识符。");
+    }
+    if (!name) throw new Error("列名列表包含空名称。");
+    result.push(name);
+    if (offset < input.length) {
+      offset++;
+      if (!input.slice(offset).trim()) throw new Error("列名列表不能以逗号结尾。");
+    }
+  }
+  return result;
+}
+
+function referenceTable(fk: FkDraft, driver: string): string {
+  const context = { database: fk.refDatabase ?? "", schema: fk.refSchema, table: fk.refTable.trim(), driverType: driver };
+  if (context.database && !context.schema && (driver === "mssql" || driver === "sqlserver")) {
+    throw new Error("指定引用数据库时，请同时填写引用 schema。");
+  }
+  // 未填写引用库时保留当前库语义；点号始终属于名称自身。
+  if (!context.database && (driver === "mysql" || driver === "mariadb")) return quoteIdent(context.table, driver);
+  if (!context.database && (driver === "mssql" || driver === "sqlserver")) {
+    return [context.schema, context.table].filter((part): part is string => Boolean(part)).map((part) => quoteIdent(part, driver)).join(".");
+  }
+  return quoteTable(context);
+}
 
 /**
  * 默认值三态（参考 Beekeeper）：
@@ -27,21 +80,25 @@ export interface ColumnDraft {
 
 export interface IndexDraft {
   name: string;
-  /** 逗号分隔的列名 */
+  /** 逗号分隔的列名；名称含逗号时必须引用标识符。 */
   columns: string;
   isUnique: boolean;
   isPrimary?: boolean;
   isNew?: boolean;
   deleted?: boolean;
+  /** 已有表达式、包含列和部分索引仅展示，按原名精确删除。 */
+  details?: string;
 }
 
 /** 外键编辑草稿（已有外键只支持删除，修改 = 删旧建新） */
 export interface FkDraft {
   name: string;
-  /** 逗号分隔的本表列名 */
+  /** 逗号分隔的本表列名；名称含逗号时必须引用标识符。 */
   columns: string;
   refTable: string;
-  /** 逗号分隔的引用列名 */
+  refSchema?: string;
+  refDatabase?: string;
+  /** 逗号分隔的引用列名；名称含逗号时必须引用标识符。 */
   refColumns: string;
   /** 空 = 不生成子句 */
   onDelete: string;
@@ -89,7 +146,7 @@ function columnDef(d: ColumnDraft, driver: string): string {
  */
 export function buildAlterStatements(
   driver: string,
-  table: string,
+  table: string | DdlTableIdentity,
   origCols: ColumnDraft[],
   cols: ColumnDraft[],
   origIdxs: IndexDraft[],
@@ -97,7 +154,11 @@ export function buildAlterStatements(
   origFks: FkDraft[] = [],
   fks: FkDraft[] = []
 ): string[] {
-  const qt = quoteIdent(table, driver);
+  const identity = typeof table === "string" ? undefined : { ...table, driverType: driver };
+  const tableName = typeof table === "string" ? table : table.table;
+  const qt = identity ? quoteTable(identity) : quoteIdent(tableName, driver);
+  const qualifiedIndex = (name: string) => identity?.schema
+    ? `${quoteIdent(identity.schema, driver)}.${quoteIdent(name, driver)}` : quoteIdent(name, driver);
   const isPg = driver === "postgres" || driver === "postgresql";
   const isSqlite = driver === "sqlite";
   const isMssql = driver === "sqlserver" || driver === "mssql";
@@ -110,13 +171,13 @@ export function buildAlterStatements(
     .map((c) => c.name.trim());
   const pkChanged =
     origPk.length !== newPk.length ||
-    [...origPk].sort().join(",") !== [...newPk].sort().join(",");
+    JSON.stringify([...origPk].sort()) !== JSON.stringify([...newPk].sort());
 
   if (pkChanged && origPk.length > 0) {
     if (isSqlite) {
       // SQLite 不支持删除主键约束，需重建表，跳过
     } else if (isPg || isMssql) {
-      const pkName = origIdxs.find((i) => i.isPrimary)?.name ?? `${table}_pkey`;
+      const pkName = origIdxs.find((i) => i.isPrimary)?.name ?? `${tableName}_pkey`;
       stmts.push(`ALTER TABLE ${qt} DROP CONSTRAINT ${quoteIdent(pkName, driver)};`);
     } else {
       stmts.push(`ALTER TABLE ${qt} DROP PRIMARY KEY;`);
@@ -156,7 +217,7 @@ export function buildAlterStatements(
     if (c.name.trim() && c.name.trim() !== orig.name) {
       stmts.push(
         isMssql
-          ? `EXEC sp_rename '${table}.${orig.name.replace(/'/g, "''")}', '${c.name.trim().replace(/'/g, "''")}', 'COLUMN';`
+          ? `EXEC sp_rename N'${`${identity ? tableParts(identity).map((part) => quoteIdent(part, driver)).join(".") : quoteIdent(tableName, driver)}.${quoteIdent(orig.name, driver)}`.replace(/'/g, "''")}', N'${c.name.trim().replace(/'/g, "''")}', 'COLUMN';`
           : `ALTER TABLE ${qt} RENAME COLUMN ${quoteIdent(orig.name, driver)} TO ${quoteIdent(c.name.trim(), driver)};`
       );
       currentName = c.name.trim();
@@ -220,7 +281,7 @@ export function buildAlterStatements(
     const colList = newPk.map((n) => quoteIdent(n, driver)).join(", ");
     stmts.push(
       isMssql
-        ? `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent(`${table}_pk`, driver)} PRIMARY KEY (${colList});`
+        ? `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent(`${tableName}_pk`, driver)} PRIMARY KEY (${colList});`
         : `ALTER TABLE ${qt} ADD PRIMARY KEY (${colList});`
     );
   }
@@ -229,14 +290,10 @@ export function buildAlterStatements(
   for (const idx of idxs) {
     if (idx.isNew) {
       if (!idx.deleted && idx.name.trim() && idx.columns.trim()) {
-        const colList = idx.columns
-          .split(",")
-          .map((s) => quoteIdent(s.trim(), driver))
-          .filter((s) => s !== "``" && s !== '""' && s !== "[]")
-          .join(", ");
+        const colList = parseIdentifierList(idx.columns).map((name) => quoteIdent(name, driver)).join(", ");
         stmts.push(
           isPg || isSqlite || isMssql
-            ? `CREATE ${idx.isUnique ? "UNIQUE " : ""}INDEX ${quoteIdent(idx.name.trim(), driver)} ON ${qt} (${colList});`
+            ? `CREATE ${idx.isUnique ? "UNIQUE " : ""}INDEX ${isSqlite ? qualifiedIndex(idx.name.trim()) : quoteIdent(idx.name.trim(), driver)} ON ${isSqlite ? quoteIdent(tableName, driver) : qt} (${colList});`
             : `ALTER TABLE ${qt} ADD ${idx.isUnique ? "UNIQUE " : ""}INDEX ${quoteIdent(idx.name.trim(), driver)} (${colList});`
         );
       }
@@ -245,7 +302,7 @@ export function buildAlterStatements(
         isMssql
           ? `DROP INDEX ${quoteIdent(idx.name, driver)} ON ${qt};`
           : isPg || isSqlite
-            ? `DROP INDEX ${quoteIdent(idx.name, driver)};`
+            ? `DROP INDEX ${qualifiedIndex(idx.name)};`
             : `ALTER TABLE ${qt} DROP INDEX ${quoteIdent(idx.name, driver)};`
       );
     }
@@ -253,10 +310,7 @@ export function buildAlterStatements(
 
   // ---- 外键（已有外键只支持删除；修改 = 删旧建新） ----
   const parseCols = (s: string) =>
-    s
-      .split(",")
-      .map((x) => x.trim())
-      .filter((x) => x !== "")
+    parseIdentifierList(s)
       .map((x) => quoteIdent(x, driver))
       .join(", ");
 
@@ -273,7 +327,7 @@ export function buildAlterStatements(
       ) {
         let s = `ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent(fk.name.trim(), driver)} ` +
           `FOREIGN KEY (${parseCols(fk.columns)}) ` +
-          `REFERENCES ${quoteIdent(fk.refTable.trim(), driver)} (${parseCols(fk.refColumns)})`;
+          `REFERENCES ${referenceTable(fk, driver)} (${parseCols(fk.refColumns)})`;
         if (fk.onDelete) s += ` ON DELETE ${fk.onDelete}`;
         if (fk.onUpdate) s += ` ON UPDATE ${fk.onUpdate}`;
         stmts.push(s + ";");
@@ -327,10 +381,7 @@ export function buildCreateTableStatements(
   }
 
   const parseCols = (s: string) =>
-    s
-      .split(",")
-      .map((x) => x.trim())
-      .filter((x) => x !== "")
+    parseIdentifierList(s)
       .map((x) => quoteIdent(x, driver))
       .join(", ");
 
@@ -340,7 +391,7 @@ export function buildCreateTableStatements(
     if (idx.deleted || !idx.columns.trim()) continue;
     const colList = parseCols(idx.columns);
     if (!colList) continue;
-    const name = idx.name.trim() || `${t}_${idx.columns.split(",")[0].trim()}_idx`;
+    const name = idx.name.trim() || `${t}_${parseIdentifierList(idx.columns)[0]}_idx`;
     if (separateIdx) {
       if (idx.isUnique) {
         defs.push(`CONSTRAINT ${quoteIdent(name, driver)} UNIQUE (${colList})`);
@@ -355,10 +406,10 @@ export function buildCreateTableStatements(
   // 外键（两种方言都内联）
   for (const fk of fks) {
     if (fk.deleted || !fk.columns.trim() || !fk.refTable.trim() || !fk.refColumns.trim()) continue;
-    const name = fk.name.trim() || `${t}_${fk.columns.split(",")[0].trim()}_fk`;
+    const name = fk.name.trim() || `${t}_${parseIdentifierList(fk.columns)[0]}_fk`;
     let s =
       `CONSTRAINT ${quoteIdent(name, driver)} FOREIGN KEY (${parseCols(fk.columns)}) ` +
-      `REFERENCES ${quoteIdent(fk.refTable.trim(), driver)} (${parseCols(fk.refColumns)})`;
+      `REFERENCES ${referenceTable(fk, driver)} (${parseCols(fk.refColumns)})`;
     if (fk.onDelete) s += ` ON DELETE ${fk.onDelete}`;
     if (fk.onUpdate) s += ` ON UPDATE ${fk.onUpdate}`;
     defs.push(s);

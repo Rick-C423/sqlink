@@ -6,6 +6,9 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { tauriService } from "@/services/tauriService";
 import { cn } from "@/lib/utils";
 import { createQueryActions } from "@/lib/queryActions";
+import { QUERY_READ_ONLY_REASON } from "@/lib/gridEdits";
+import { queryDraftKey } from "@/stores/gridDraftStore";
+import { DraftNavigationDialog } from "@/components/result/DraftNavigationDialog";
 import { ConnectionTree } from "@/components/connection/ConnectionTree";
 import { DatabaseInfoPanel } from "@/components/connection/DatabaseInfoPanel";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
@@ -377,20 +380,22 @@ export default function App() {
                   <TableView
                     // key 绑定表身份：切表/切页签时强制重建实例，
                     // 否则筛选、页码等 useState 会跨表残留
-                    key={`${activeWs.connectionId}/${activeWs.database}/${activeWs.table}`}
+                    key={activeWs.id}
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     table={activeWs.table}
+                    schema={activeWs.schema}
                     initialSubTab={activeWs.tableSubTab}
                     subTabNonce={activeWs.subTabNonce}
                   />
                 )}
                 {activeWs?.kind === "view" && activeWs.database && activeWs.table && (
                   <ViewView
-                    key={`${activeWs.connectionId}/${activeWs.database}/${activeWs.table}`}
+                    key={activeWs.id}
                     connectionId={activeWs.connectionId}
                     database={activeWs.database}
                     view={activeWs.table}
+                    schema={activeWs.schema}
                   />
                 )}
                 {activeWs?.kind === "routine" && activeWs.database && activeWs.table && activeWs.routineKind && (
@@ -444,18 +449,15 @@ export default function App() {
             {
               label: t("app.closeOthers"),
               onClick: () => {
-                useWorkspaceStore
-                  .getState()
-                  .tabs.filter((t) => t.id !== tabMenu.tabId)
-                  .forEach((t) => useWorkspaceStore.getState().close(t.id));
+                const state = useWorkspaceStore.getState();
+                void state.closeMany(state.tabs.filter((tab) => tab.id !== tabMenu.tabId).map((tab) => tab.id));
               },
             },
             {
               label: t("app.closeAll"),
               onClick: () => {
-                useWorkspaceStore
-                  .getState()
-                  .tabs.forEach((t) => useWorkspaceStore.getState().close(t.id));
+                const state = useWorkspaceStore.getState();
+                void state.closeMany(state.tabs.map((tab) => tab.id));
               },
             },
           ]}
@@ -498,6 +500,7 @@ export default function App() {
 
       {/* MCP 设置对话框 */}
       <McpSettingsDialog open={mcpSettingsOpen} onClose={() => setMcpSettingsOpen(false)} />
+      <DraftNavigationDialog />
     </div>
   );
 }
@@ -566,6 +569,8 @@ function QueryPanel({
       />
       <div className="border-t flex-shrink-0" style={{ height: resultHeight }}>
         <DataGrid
+          draftKey={queryDraftKey(editorTabId)}
+          readOnlyReason={QUERY_READ_ONLY_REASON}
           result={tab?.result}
           editContext={tab?.isExecuting ? null : tab?.editContext}
           onApplyEdits={(statements) => onApplyEdits(editorTabId, tab?.resultSource?.taskId, statements)}

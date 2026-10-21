@@ -1,7 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo, McpSettingsSnapshot, McpSettingsInput, ResolvedTable } from "@/types/database";
+import { ConnectionConfig, QueryResult, TableInfo, DatabaseInfo, ColumnInfo, IndexInfo, ForeignKeyInfo, ImportSummary, DumpSummary, HistoryEntry, DbUserInfo, CurrentUserInfo, McpSettingsSnapshot, McpSettingsInput, ResolvedTable, MetadataSnapshot, ExecuteDdlRequest, ObjectIdentity } from "@/types/database";
+import { metadataCache } from "@/lib/metadataCache";
+import type { ControlledTablePage, ControlledTableReadRequest, ResultContext, ResultContextValidationRequest } from "@/types/resultContext";
+import type { ChangeSetRequest, ChangeSetValidationResult } from "@/types/typedValue";
+import type { CommitReceipt } from "@/types/commitReceipt";
+import type { CredentialHealth } from "@/types/credential";
+import type { DatasetPage, DatasetReadOptions, TableCountRequest, TableCountResult } from "@/types/dataset";
+import type { ImportPlan, ImportPlanRequest, ImportExecuteRequest, ImportReport } from "@/types/importJob";
 
 export const tauriService = {
+  /** 读取凭据保护状态；不返回任何秘密材料。 */
+  async getCredentialHealth(): Promise<CredentialHealth> {
+    return await invoke("credential_health");
+  },
+
   // 连接管理
   async testConnection(config: ConnectionConfig): Promise<void> {
     await invoke("connection_test", { config });
@@ -50,9 +62,11 @@ export const tauriService = {
     connectionId: string,
     database: string | undefined,
     table: string,
-    path: string
+    path: string,
+    taskId?: string,
+    schema?: string
   ): Promise<number> {
-    return await invoke("table_export_csv", { connectionId, database, table, path });
+    return await invoke("table_export_csv", { connectionId, database, table, path, taskId, schema });
   },
 
   /**
@@ -65,7 +79,11 @@ export const tauriService = {
     path: string,
     onConflict: "error" | "skip" | "overwrite"
   ): Promise<ImportSummary> {
-    return await invoke("sql_import_file", { connectionId, database, path, onConflict });
+    try {
+      return await invoke("sql_import_file", { connectionId, database, path, onConflict });
+    } finally {
+      metadataCache.invalidateConnection(connectionId);
+    }
   },
 
   /** 转储 SQL 文件：tables 为空导出整个库，返回导出汇总 */
@@ -75,7 +93,9 @@ export const tauriService = {
     tables: string[] | undefined,
     path: string,
     includeDrop: boolean,
-    includeData: boolean
+    includeData: boolean,
+    taskId?: string,
+    tableSources?: ObjectIdentity[]
   ): Promise<DumpSummary> {
     return await invoke("sql_dump_file", {
       connectionId,
@@ -84,7 +104,14 @@ export const tauriService = {
       path,
       includeDrop,
       includeData,
+      taskId,
+      tableSources,
     });
+  },
+
+  /** 请求取消固定导出任务；请求成功不代表任务已经停止。 */
+  async cancelExport(connectionId: string, taskId: string): Promise<void> {
+    await invoke("export_cancel", { connectionId, taskId });
   },
 
   // 查询执行
@@ -93,13 +120,90 @@ export const tauriService = {
     sql: string,
     database?: string,
     queryId?: number,
-    record?: boolean
+    record?: boolean,
+    taskId?: string
   ): Promise<QueryResult> {
-    return await invoke("query_execute", { connectionId, sql, database, queryId, record });
+    try {
+      return await invoke("query_execute", { connectionId, sql, database, queryId, record, taskId });
+    } finally {
+      // 显式 SQL 可能改变结构、权限或会话；失败也可能已有部分语句生效。
+      metadataCache.invalidateConnection(connectionId);
+    }
   },
 
-  async cancelQuery(connectionId: string, queryId: number): Promise<void> {
-    await invoke("query_cancel", { connectionId, queryId });
+  async cancelQuery(connectionId: string, queryId: number, taskId?: string): Promise<void> {
+    await invoke("query_cancel", { connectionId, queryId, taskId });
+  },
+
+  async getTaskStatus(taskId: string): Promise<import("@/types/task").TaskSnapshot> {
+    return await invoke("task_get", { taskId });
+  },
+
+  async getSessionCapabilities(connectionId: string): Promise<import("@/types/task").SessionCapabilities> {
+    return await invoke("connection_session_capabilities", { connectionId });
+  },
+
+  /** 后端构造分页 SQL 并登记结果身份，前端不提交列来源或主键。 */
+  async readTablePage(request: ControlledTableReadRequest, options?: DatasetReadOptions): Promise<ControlledTablePage & Partial<DatasetPage>> {
+    if (options) return await invoke("table_read_dataset_page", { request: { request, ...options } });
+    return await invoke("table_read_page", { request });
+  },
+
+  async countTable(request: TableCountRequest): Promise<TableCountResult> {
+    return await invoke("table_count", { request });
+  },
+
+  async cancelTableTask(connectionId: string, taskId: string): Promise<void> {
+    await invoke("table_task_cancel", { connectionId, taskId });
+  },
+
+  async previewImport(request: ImportPlanRequest): Promise<ImportPlan> {
+    return await invoke("sql_import_preview", { request });
+  },
+
+  async executeImport(request: ImportExecuteRequest): Promise<ImportReport> {
+    try {
+      return await invoke("sql_import_execute", { request });
+    } finally {
+      // 计划来源仅后端持有；断线时也可能已有部分 DDL 生效，不能保留旧目录缓存。
+      metadataCache.clear();
+    }
+  },
+
+  async getImportReceipt(connectionId: string, runId: string): Promise<ImportReport> {
+    return await invoke("sql_import_receipt", { connectionId, runId });
+  },
+
+  async cancelImport(connectionId: string, taskId: string): Promise<void> {
+    await invoke("import_cancel", { connectionId, taskId });
+  },
+
+  async validateResultContext(request: ResultContextValidationRequest): Promise<ResultContext> {
+    return await invoke("result_context_validate", { request });
+  },
+
+  /** 只预检类型化变更与后端身份，不执行写入、不返回 SQL、不授予网格编辑权限。 */
+  async validateChangeSet(request: ChangeSetRequest): Promise<ChangeSetValidationResult> {
+    return await invoke("changeset_validate", { request });
+  },
+
+  /** 类型化提交入口；界面仍由后端门禁保持只读，不接受拼接 SQL。 */
+  async commitChangeSet(request: ChangeSetRequest, taskId?: string): Promise<CommitReceipt> {
+    return await invoke("changeset_commit", { request, taskId });
+  },
+
+  /** 结果未知时只读取既有回执，不能用重复提交代替核查。 */
+  async getChangeSetReceipt(changeSetId: string, resultId: string, revision: number): Promise<CommitReceipt> {
+    return await invoke("changeset_receipt", { changeSetId, resultId, revision });
+  },
+
+  async releaseResultContext(resultId: string, revision: number): Promise<void> {
+    await invoke("result_context_release", { request: { protocolVersion: 1, resultId, revision } });
+  },
+
+  /** 旧网格写入路径已关闭，受控提交门禁齐备前后端始终拒绝。 */
+  async applyGridEdits(): Promise<never> {
+    return await invoke("query_apply_grid_edits");
   },
 
   // 查询历史
@@ -115,13 +219,19 @@ export const tauriService = {
     await invoke("history_clear", { connectionId });
   },
 
-  /** 事务批量执行写语句（数据网格编辑提交），返回总影响行数 */
+  /** 编辑器显式批执行，贯穿独占租约；网格不得调用。 */
   async executeBatch(
     connectionId: string,
     database: string | undefined,
-    statements: string[]
+    statements: string[],
+    queryId?: number,
+    taskId?: string
   ): Promise<number> {
-    return await invoke("query_execute_batch", { connectionId, database, statements });
+    try {
+      return await invoke("query_execute_batch", { connectionId, database, statements, queryId, taskId });
+    } finally {
+      metadataCache.invalidateConnection(connectionId);
+    }
   },
 
   // Schema
@@ -141,8 +251,8 @@ export const tauriService = {
     return await invoke("schema_get_views", { connectionId, database });
   },
 
-  async getViewDefinition(connectionId: string, database: string | undefined, view: string): Promise<string> {
-    return await invoke("schema_get_view_definition", { connectionId, database, view });
+  async getViewDefinition(connectionId: string, database: string | undefined, view: string, schema?: string): Promise<string> {
+    return await invoke("schema_get_view_definition", { connectionId, database, view, schema });
   },
 
   async getTriggers(connectionId: string, database?: string): Promise<TableInfo[]> {
@@ -184,6 +294,20 @@ export const tauriService = {
   /** 按数据库实际名称解析规则定位单表，保留完整库名和 schema。 */
   async resolveTable(connectionId: string, database: string, tableParts: string[]): Promise<ResolvedTable> {
     return await invoke("schema_resolve_table", { connectionId, database, tableParts });
+  },
+
+  /** 一次读取固定对象的列、索引和外键，并返回后端连接代次与结构版本。 */
+  async getTableMetadata(connectionId: string, database: string, tableParts: string[]): Promise<MetadataSnapshot> {
+    return await invoke("schema_get_table_metadata", { connectionId, database, tableParts });
+  },
+
+  /** 结构设计器显式 DDL；后端核对原连接代次、目标和结构版本。 */
+  async executeDdl(request: ExecuteDdlRequest): Promise<number> {
+    try {
+      return await invoke("schema_execute_ddl", { request });
+    } finally {
+      metadataCache.invalidateConnection(request.connectionId);
+    }
   },
 
   async getIndexes(connectionId: string, database: string | undefined, table: string): Promise<IndexInfo[]> {

@@ -4,19 +4,76 @@
 
 use std::io::BufRead;
 
+/// 同时限制单行读取和单条语句；不会先读入任意大的行再检查。
+pub const MAX_IMPORT_STATEMENT_BYTES: usize = 16 * 1024 * 1024;
+/// 客户端解析指令的资源预算，和服务端 SQL/业务规则无关。
+const MAX_IMPORT_DELIMITER_BYTES: usize = 128;
+
+fn statement_limit() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "IMPORT_STATEMENT_LIMIT: 单行或单条 SQL 语句超过导入字节预算",
+    )
+}
+
+fn append_statement(out: &mut String, text: &str, maximum: usize) -> std::io::Result<()> {
+    if text.len() > maximum.saturating_sub(out.len()) {
+        return Err(statement_limit());
+    }
+    out.push_str(text);
+    Ok(())
+}
+
+fn bounded_line(reader: &mut impl BufRead, maximum: usize) -> std::io::Result<Option<String>> {
+    let mut line = Vec::with_capacity(maximum.min(8192));
+    loop {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            break;
+        }
+        let length = buffer
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(buffer.len(), |i| i + 1);
+        // 在拷贝之前拒绝超预算数据，reader 的缓冲区也不会被要求无界增长。
+        if length > maximum.saturating_sub(line.len()) {
+            return Err(statement_limit());
+        }
+        let ended = buffer[length - 1] == b'\n';
+        line.extend_from_slice(&buffer[..length]);
+        reader.consume(length);
+        if ended {
+            break;
+        }
+    }
+    if line.is_empty() {
+        return Ok(None);
+    }
+    String::from_utf8(line)
+        .map(Some)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
 pub struct SqlSplitter {
     delimiter: String,
     /// MySQL 方言：反斜杠是转义符、`#` 是行注释；PG 都不是
     mysql_mode: bool,
     /// 上一条语句分隔符之后遗留的未扫描文本
     pending: String,
-    in_str: Option<u8>, // b'\'' | b'"' | b'`'
+    /// 当前引号的关闭字符；方括号标识符使用 b']'。
+    in_str: Option<u8>, // b'\'' | b'"' | b'`' | b']'
     in_block_comment: bool,
     escape_next: bool,
+    max_statement_bytes: usize,
 }
 
 impl SqlSplitter {
     pub fn new(mysql_mode: bool) -> Self {
+        Self::with_max_statement_bytes(mysql_mode, MAX_IMPORT_STATEMENT_BYTES)
+    }
+
+    /// 允许测试在很小预算下验证失败前不会发送半条 SQL。
+    pub fn with_max_statement_bytes(mysql_mode: bool, max_statement_bytes: usize) -> Self {
         Self {
             delimiter: ";".to_string(),
             mysql_mode,
@@ -24,6 +81,7 @@ impl SqlSplitter {
             in_str: None,
             in_block_comment: false,
             escape_next: false,
+            max_statement_bytes,
         }
     }
 
@@ -35,24 +93,37 @@ impl SqlSplitter {
             let line = if from_pending {
                 std::mem::take(&mut self.pending)
             } else {
-                let mut l = String::new();
-                if reader.read_line(&mut l)? == 0 {
+                let Some(line) = bounded_line(reader, self.max_statement_bytes)? else {
+                    if self.in_str.is_some() || self.in_block_comment || self.escape_next {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "IMPORT_PARSE_ERROR: 文件末尾存在未闭合字符串、标识符或块注释",
+                        ));
+                    }
                     let t = out.trim().to_string();
                     return Ok(if t.is_empty() { None } else { Some(t) });
-                }
-                l
+                };
+                line
             };
 
             // DELIMITER 指令：只在语句缓冲为空、且是文件中独立行时生效
-            if !from_pending && out.trim().is_empty() {
+            if !from_pending {
                 let t = line.trim_start();
                 let tb = t.as_bytes();
-                if tb.len() > 9 && tb[..9].eq_ignore_ascii_case(b"delimiter") {
+                if tb.len() >= 9
+                    && tb[..9].eq_ignore_ascii_case(b"delimiter")
+                    && (tb.len() == 9 || tb[9].is_ascii_whitespace())
+                    && out.trim().is_empty()
+                {
                     // 前 9 字节已确认是 ASCII "delimiter"，此处切片安全
                     let d = t[9..].trim();
-                    if !d.is_empty() {
-                        self.delimiter = d.to_string();
+                    if d.is_empty() || d.len() > MAX_IMPORT_DELIMITER_BYTES {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "IMPORT_PARSE_ERROR: DELIMITER 必须为 1 至 128 字节",
+                        ));
                     }
+                    self.delimiter = d.to_string();
                     continue;
                 }
             }
@@ -63,29 +134,51 @@ impl SqlSplitter {
             while i < bytes.len() {
                 let c = bytes[i];
 
+                // 正常状态先匹配完整分隔符，也支持 UTF-8 自定义分隔符。
+                if self.in_str.is_none()
+                    && !self.in_block_comment
+                    && !self.escape_next
+                    && bytes[i..].starts_with(delim)
+                {
+                    let stmt = out.trim().to_string();
+                    self.pending = line[i + delim.len()..].to_string();
+                    if stmt.is_empty() {
+                        // 空语句（连续分隔符）：直接继续扫 pending。
+                        out.clear();
+                        break;
+                    }
+                    return Ok(Some(stmt));
+                }
+
                 // 多字节 UTF-8 字符：整字符原样保留（不可能命中任何 ASCII 语法记号）
                 if !c.is_ascii() {
                     let ch = line[i..].chars().next().unwrap();
-                    out.push(ch);
+                    append_statement(
+                        &mut out,
+                        &line[i..i + ch.len_utf8()],
+                        self.max_statement_bytes,
+                    )?;
+                    // MySQL 反斜杠只转义紧随的一个字符，不能泄漏到后续引号。
+                    self.escape_next = false;
                     i += ch.len_utf8();
                     continue;
                 }
 
                 if self.escape_next {
-                    out.push(c as char);
+                    append_statement(&mut out, &line[i..i + 1], self.max_statement_bytes)?;
                     self.escape_next = false;
                     i += 1;
                     continue;
                 }
 
                 if let Some(q) = self.in_str {
-                    out.push(c as char);
-                    if self.mysql_mode && c == b'\\' {
+                    append_statement(&mut out, &line[i..i + 1], self.max_statement_bytes)?;
+                    if self.mysql_mode && q != b']' && c == b'\\' {
                         self.escape_next = true;
                     } else if c == q {
                         // 双写引号 = 转义（SQL 标准）
                         if i + 1 < bytes.len() && bytes[i + 1] == q {
-                            out.push(q as char);
+                            append_statement(&mut out, &line[i..i + 1], self.max_statement_bytes)?;
                             i += 1;
                         } else {
                             self.in_str = None;
@@ -96,9 +189,9 @@ impl SqlSplitter {
                 }
 
                 if self.in_block_comment {
-                    out.push(c as char);
+                    append_statement(&mut out, &line[i..i + 1], self.max_statement_bytes)?;
                     if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-                        out.push('/');
+                        append_statement(&mut out, "/", self.max_statement_bytes)?;
                         i += 2;
                         self.in_block_comment = false;
                     } else {
@@ -107,28 +200,20 @@ impl SqlSplitter {
                     continue;
                 }
 
-                // 正常状态：先匹配分隔符
-                if bytes[i..].starts_with(delim) {
-                    let stmt = out.trim().to_string();
-                    self.pending = line[i + delim.len()..].to_string();
-                    if stmt.is_empty() {
-                        // 空语句（连续分隔符）：直接继续扫 pending
-                        out.clear();
-                        break;
-                    }
-                    return Ok(Some(stmt));
-                }
-
                 match c {
                     b'\'' | b'"' | b'`' => {
                         self.in_str = Some(c);
-                        out.push(c as char);
+                        append_statement(&mut out, &line[i..i + 1], self.max_statement_bytes)?;
+                        i += 1;
+                    }
+                    b'[' => {
+                        self.in_str = Some(b']');
+                        append_statement(&mut out, "[", self.max_statement_bytes)?;
                         i += 1;
                     }
                     b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
                         self.in_block_comment = true;
-                        out.push('/');
-                        out.push('*');
+                        append_statement(&mut out, "/*", self.max_statement_bytes)?;
                         i += 2;
                     }
                     b'-' if i + 1 < bytes.len()
@@ -136,15 +221,15 @@ impl SqlSplitter {
                         && (i + 2 >= bytes.len() || bytes[i + 2].is_ascii_whitespace()) =>
                     {
                         // 行注释：整行剩余部分原样保留
-                        out.push_str(&line[i..]);
+                        append_statement(&mut out, &line[i..], self.max_statement_bytes)?;
                         i = bytes.len();
                     }
                     b'#' if self.mysql_mode => {
-                        out.push_str(&line[i..]);
+                        append_statement(&mut out, &line[i..], self.max_statement_bytes)?;
                         i = bytes.len();
                     }
                     _ => {
-                        out.push(c as char);
+                        append_statement(&mut out, &line[i..i + 1], self.max_statement_bytes)?;
                         i += 1;
                     }
                 }
@@ -207,9 +292,61 @@ fn read_word(b: &[u8], i: usize) -> Option<(String, usize)> {
     }
 }
 
+/// 扫描一个真实标识符段；引号内的点、空格、分号和注释记号都只是名称字符。
+fn read_identifier(sql: &str, start: usize) -> Option<(usize, String)> {
+    let bytes = sql.as_bytes();
+    let first = *bytes.get(start)?;
+    if matches!(first, b'`' | b'"' | b'[') {
+        let close = if first == b'[' { b']' } else { first };
+        let mut index = start + 1;
+        while index < bytes.len() {
+            if bytes[index] == close {
+                if bytes.get(index + 1) == Some(&close) {
+                    index += 2;
+                    continue;
+                }
+                let doubled = format!("{}{}", close as char, close as char);
+                let decoded = sql[start + 1..index].replace(&doubled, &(close as char).to_string());
+                return Some((index + 1, decoded));
+            }
+            index += 1;
+        }
+        return None;
+    }
+    let mut chars = sql[start..].char_indices();
+    let (_, first) = chars.next()?;
+    if !(first.is_alphabetic() || first == '_') {
+        return None;
+    }
+    let mut end = start + first.len_utf8();
+    for (offset, character) in chars {
+        if !(character.is_alphanumeric() || character == '_' || character == '$') {
+            break;
+        }
+        end = start + offset + character.len_utf8();
+    }
+    Some((end, sql[start..end].to_owned()))
+}
+
+/// 返回限定名称的原文结束位置及解码后的末段；不按引号内的点切分。
+fn read_qualified_identifier(sql: &str, start: usize) -> Option<(usize, String)> {
+    let (mut end, mut last) = read_identifier(sql, start)?;
+    loop {
+        let Some(next) = skip_ws_comments(sql, end) else {
+            break;
+        };
+        if sql.as_bytes()[next] != b'.' {
+            break;
+        }
+        let segment = skip_ws_comments(sql, next + 1)?;
+        (end, last) = read_identifier(sql, segment)?;
+    }
+    Some((end, last))
+}
+
 /// 识别 CREATE TABLE 语句。
 /// 返回 (表名原文 token, "TABLE" 关键字结束位置, 是否已带 IF NOT EXISTS)
-pub fn parse_create_table(sql: &str) -> Option<(String, usize, bool)> {
+fn create_table_details(sql: &str) -> Option<(std::ops::Range<usize>, usize, bool)> {
     let b = sql.as_bytes();
     let mut i = skip_ws_comments(sql, 0)?;
     let (kw, next) = read_word(b, i)?;
@@ -244,50 +381,59 @@ pub fn parse_create_table(sql: &str) -> Option<(String, usize, bool)> {
         }
     }
 
-    // 表名 token：`db`.`t` / "db"."t" / db.t / t
+    // 只对明确识别的限定名称执行 skip/overwrite，未知或残缺语法不猜目标。
     let start = i;
-    while i < b.len() {
-        let c = b[i];
-        if c == b'`' || c == b'"' {
-            i += 1;
-            while i < b.len() {
-                if b[i] == c {
-                    if i + 1 < b.len() && b[i + 1] == c {
-                        i += 2;
-                        continue;
-                    }
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-        } else if c.is_ascii_whitespace() || c == b'(' {
-            break;
-        } else {
-            i += 1;
+    let (end, _) = read_qualified_identifier(sql, start)?;
+    let definition = skip_ws_comments(sql, end)?;
+    if b[definition] != b'(' {
+        let (keyword, _) = read_word(b, definition)?;
+        if !keyword.eq_ignore_ascii_case("as") && !keyword.eq_ignore_ascii_case("like") {
+            return None;
         }
     }
-    if start == i {
-        None
-    } else {
-        Some((sql[start..i].to_string(), after_table, has_ine))
+    Some((start..end, after_table, has_ine))
+}
+
+/// 返回 CREATE TABLE 的目标名称原文范围，保留其余 DDL 字节不变。
+/// TEMP/VIRTUAL 等未识别变体返回 None，由调用方明确拒绝需要改写的操作。
+pub fn create_table_target_span(sql: &str) -> Option<std::ops::Range<usize>> {
+    create_table_details(sql).map(|(span, _, _)| span)
+}
+
+/// 兼容原签名；名称解析和 span 改写共用同一个词法扫描结果。
+pub fn parse_create_table(sql: &str) -> Option<(String, usize, bool)> {
+    let (span, after_table, has_ine) = create_table_details(sql)?;
+    Some((sql[span].to_owned(), after_table, has_ine))
+}
+
+/// 解码完整的逐段标识符，引用内的点号不会被拆开。
+pub fn decode_identifier_parts(token: &str) -> Option<Vec<String>> {
+    let mut start = skip_ws_comments(token, 0)?;
+    let mut parts = Vec::new();
+    loop {
+        let (end, decoded) = read_identifier(token, start)?;
+        if decoded.is_empty() {
+            return None;
+        }
+        parts.push(decoded);
+        let Some(next) = skip_ws_comments(token, end) else {
+            return Some(parts);
+        };
+        if token.as_bytes()[next] != b'.' {
+            return None;
+        }
+        start = skip_ws_comments(token, next + 1)?;
     }
 }
 
 /// 表名 token 归一化：取最后一段、去引号、小写（用于存在性比较）
 pub fn normalize_table_name(token: &str) -> String {
-    let last = token.rsplit('.').next().unwrap_or(token).trim();
-    let unquoted = if (last.starts_with('`') && last.ends_with('`') && last.len() >= 2)
-        || (last.starts_with('"') && last.ends_with('"') && last.len() >= 2)
-    {
-        &last[1..last.len() - 1]
-    } else {
-        last
-    };
-    unquoted
-        .replace("``", "`")
-        .replace("\"\"", "\"")
-        .to_lowercase()
+    let parsed = skip_ws_comments(token, 0)
+        .and_then(|start| read_qualified_identifier(token, start))
+        .filter(|(end, _)| token[*end..].trim().is_empty());
+    parsed
+        .map(|(_, last)| last.to_lowercase())
+        .unwrap_or_default()
 }
 
 // ---------- 转储（导出）辅助 ----------
@@ -502,5 +648,42 @@ mod tests {
         assert_eq!(normalize_table_name("`my_db`.`Users`"), "users");
         assert_eq!(normalize_table_name("\"public\".\"T\""), "t");
         assert_eq!(normalize_table_name("plain_name"), "plain_name");
+    }
+}
+
+#[cfg(test)]
+mod identity_span_tests {
+    use super::*;
+
+    #[test]
+    fn create_target_span_preserves_unrelated_quoted_text_and_complex_names() {
+        let sql = "CREATE TABLE IF NOT EXISTS /* 目标前注释 */ \"literal .\"\" table\" (\"literal .\"\" table\" TEXT DEFAULT 'literal .\" table')";
+        let span = create_table_target_span(sql).unwrap();
+        assert_eq!(&sql[span.clone()], "\"literal .\"\" table\"");
+        let qualified = "\"main\".\"literal .\"\" table\"";
+        let rewritten = format!("{}{}{}", &sql[..span.start], qualified, &sql[span.end..]);
+        assert!(rewritten.ends_with("(\"literal .\"\" table\" TEXT DEFAULT 'literal .\" table')"));
+        assert!(rewritten.starts_with("CREATE TABLE IF NOT EXISTS /* 目标前注释 */ \"main\"."));
+        assert!(
+            create_table_target_span("CREATE VIRTUAL TABLE item USING fts5(content)").is_none()
+        );
+    }
+
+    #[test]
+    fn decode_identifier_parts_keeps_dots_spaces_and_escaped_quotes_inside_each_segment() {
+        assert_eq!(
+            decode_identifier_parts("\"schema .\"\" name\".\"table .\"\" name\""),
+            Some(vec!["schema .\" name".into(), "table .\" name".into()])
+        );
+        assert_eq!(
+            decode_identifier_parts("`db``. name`. /*段间注释*/ `table``. name`"),
+            Some(vec!["db`. name".into(), "table`. name".into()])
+        );
+        assert_eq!(
+            decode_identifier_parts("[schema]]. name].[table]]. name]"),
+            Some(vec!["schema]. name".into(), "table]. name".into()])
+        );
+        assert!(decode_identifier_parts("\"partial\".").is_none());
+        assert!(decode_identifier_parts("\"literal\" extra").is_none());
     }
 }

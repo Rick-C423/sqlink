@@ -1,0 +1,38 @@
+{
+  "mysql": "1\tfirst\ttext:initial\t00FF00\t0\r\n2\tsecond\t<SQL NULL>\t\t0\r\n9007199254740993\tlarge keymysql-desktop-saved\ttext:NULL\tFF\t9223372036854775807",
+  "postgres": "1\tfirst\t<SQL NULL>\t00ff00\t0\r\n2\tsecond\ttext:\t\t0\r\n9007199254740993\tlarge key\ttext:NULL\tff\t9223372036854775807",
+  "sqlite": [
+    [
+      "1",
+      "first",
+      "text:initial",
+      "00FF0011",
+      "0",
+      1.5
+    ],
+    [
+      "2",
+      "second",
+      "<SQL NULL>",
+      "",
+      "0",
+      2.5
+    ],
+    [
+      "3",
+      "desktop-insert-defaults",
+      "<SQL NULL>",
+      "<SQL NULL>",
+      null,
+      null
+    ],
+    [
+      "9007199254740993",
+      "large keysqlite-desktop-saved",
+      "text:NULL",
+      "FF",
+      "9223372036854775807",
+      3.5
+    ]
+  ]
+}

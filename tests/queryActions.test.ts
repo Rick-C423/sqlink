@@ -3,6 +3,7 @@ import { beforeEach, test } from "node:test";
 import { useEditorStore } from "../src/stores/editorStore";
 import { useConnectionStore } from "../src/stores/connectionStore";
 import { createQueryActions } from "../src/lib/queryActions";
+import { useGridDraftStore, queryDraftKey } from "../src/stores/gridDraftStore";
 import type { QueryResult, QueryTarget, ResolvedTable } from "../src/types/database";
 
 function deferred<T>() {
@@ -23,15 +24,16 @@ const result = (id = 1): QueryResult => ({
 function harness() {
   const calls = { queries: [] as unknown[][], batches: [] as unknown[][], cancels: [] as unknown[][], metadata: [] as unknown[][] };
   const service = {
-    async executeQuery(...args: [string, string, string?, number?, boolean?]): Promise<QueryResult> {
+    async executeQuery(...args: [string, string, string?, number?, boolean?, string?]): Promise<QueryResult> {
       calls.queries.push(args);
       return result();
     },
-    async executeBatch(...args: [string, string | undefined, string[]]): Promise<number> {
+    async executeBatch(...args: [string, string | undefined, string[], number?, string?]): Promise<number> {
       calls.batches.push(args);
       return 1;
     },
-    async cancelQuery(...args: [string, number]) { calls.cancels.push(args); },
+    async cancelQuery(...args: [string, number, string?]) { calls.cancels.push(args); },
+    async applyGridEdits(): Promise<never> { throw new Error("GRID_EDIT_CONTEXT_REQUIRED"); },
     async resolveTable(...args: [string, string, string[]]): Promise<ResolvedTable> {
       calls.metadata.push(args);
       return { database: args[1], schema: "other_schema", table: "users", columns };
@@ -42,48 +44,46 @@ function harness() {
 
 const tab = () => useEditorStore.getState().tabs.find((entry) => entry.id === "tab")!;
 beforeEach(() => {
+  useGridDraftStore.setState({ drafts: {}, navigation: null });
   useEditorStore.setState({ tabs: [{ id: "tab", title: "查询", content: "", isExecuting: false }], activeTab: "tab" });
   useConnectionStore.setState({ activeConnection: "A", selectedDatabase: "db_a" });
 });
 
-test("A 查询后切换到 B，旧结果保存和刷新始终使用 A 及完整 schema", async () => {
+test("A 查询后切换到 B，来源仍固定到 A，旧网格写入被后端拒绝", async () => {
   const { actions, calls } = harness();
   await actions.execute("tab", "SELECT * FROM other_schema.users", A);
   const taskId = tab().resultSource!.taskId;
   useConnectionStore.setState({ activeConnection: "B", selectedDatabase: "db_b" });
-  await actions.applyEdits("tab", taskId, ['UPDATE "other_schema"."users" SET id=2 WHERE id=1']);
-  assert.deepEqual(calls.batches, [["A", "db_a", ['UPDATE "other_schema"."users" SET id=2 WHERE id=1']]]);
+  await assert.rejects(actions.applyEdits("tab", taskId, ['UPDATE "other_schema"."users" SET id=2 WHERE id=1']), /GRID_EDIT_CONTEXT_REQUIRED/);
+  assert.deepEqual(calls.batches, []);
   assert.deepEqual(calls.metadata[0], ["A", "db_a", ["other_schema", "users"]]);
-  assert.equal(calls.queries[1][0], "A");
-  assert.equal(calls.queries[1][1], 'SELECT * FROM "other_schema"."users"');
-  assert.equal(calls.queries[1][2], "db_a");
-  assert.equal(calls.queries[1][4], false);
-  assert.equal(tab().editContext?.connectionId, "A");
-  assert.equal(tab().editContext?.schema, "other_schema");
+  assert.equal(tab().resultSource?.connectionId, "A");
+  assert.equal(tab().resultSource?.refreshSql, 'SELECT * FROM "other_schema"."users"');
+  assert.equal(tab().editContext, null);
 });
 
-test("切换同连接的数据库或清空全局选择，也不改变旧结果的保存来源", async () => {
+test("切换数据库或清空全局选择，均不能重新启用旧网格写入", async () => {
   const { actions, calls } = harness();
   await actions.execute("tab", "SELECT * FROM users", A);
   useConnectionStore.setState({ activeConnection: "A", selectedDatabase: "other_db" });
-  await actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE users SET id=2 WHERE id=1"]);
+  await assert.rejects(actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE users SET id=2 WHERE id=1"]), /GRID_EDIT_CONTEXT_REQUIRED/);
   useConnectionStore.setState({ activeConnection: null, selectedDatabase: null });
-  await actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE users SET id=3 WHERE id=2"]);
-  assert.equal(calls.batches.length, 2);
-  assert.ok(calls.batches.every((call) => call[0] === "A" && call[1] === "db_a"));
+  await assert.rejects(actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE users SET id=3 WHERE id=2"]), /GRID_EDIT_CONTEXT_REQUIRED/);
+  assert.equal(calls.batches.length, 0);
+  assert.equal(tab().resultSource?.database, "db_a");
 });
 
-test("显式跨库查询保存到目标库，刷新保留执行库和完整表名", async () => {
+test("显式跨库查询保留完整读取身份，但不授予网格编辑权限", async () => {
   const { service, calls, actions } = harness();
   service.resolveTable = async (...args) => {
     calls.metadata.push(args);
     return { database: "target.db", schema: null, table: "user.name", columns };
   };
   await actions.execute("tab", "SELECT * FROM `target.db`.`user.name` WHERE id=1", { ...A, driverType: "mysql" });
-  await actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE `target.db`.`user.name` SET id=2 WHERE id=1"]);
-  assert.equal(calls.batches[0][1], "target.db");
-  assert.equal(calls.queries[1][1], "SELECT * FROM `target.db`.`user.name` WHERE id=1");
-  assert.equal(calls.queries[1][2], "db_a");
+  await assert.rejects(actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE `target.db`.`user.name` SET id=2 WHERE id=1"]), /GRID_EDIT_CONTEXT_REQUIRED/);
+  assert.equal(calls.batches.length, 0);
+  assert.equal(tab().resultSource?.refreshSql, "SELECT * FROM `target.db`.`user.name` WHERE id=1");
+  assert.equal(tab().resultSource?.database, "db_a");
 });
 
 test("PG 未引用标识符按服务器规则折叠大小写，引用名称保留原样", async () => {
@@ -120,9 +120,12 @@ test("查询期间切换连接，取消使用运行记录的连接与查询 ID",
   const running = actions.execute("tab", "SELECT * FROM users", A);
   await entered.promise;
   const queryId = tab().execution!.queryId;
+  const taskToken = tab().execution!.backendTaskId;
   useConnectionStore.setState({ activeConnection: "B", selectedDatabase: "db_b" });
   await actions.cancel("tab");
-  assert.deepEqual(calls.cancels, [["A", queryId]]);
+  assert.deepEqual(calls.cancels, [["A", queryId, taskToken]]);
+  assert.equal(tab().isExecuting, true);
+  assert.equal(tab().cancelRequested, true);
   waiting.resolve(result());
   await running;
   await actions.cancel("tab");
@@ -161,7 +164,7 @@ test("后发查询先完成后，迟到的旧查询不能覆盖结果、来源�
   await first;
   assert.deepEqual(tab().result?.rows, [{ values: [2] }]);
   assert.equal(tab().resultSource, newSource);
-  assert.equal(tab().editContext?.connectionId, "B");
+  assert.equal(tab().editContext, null);
   assert.equal(tab().isExecuting, false);
 });
 
@@ -179,7 +182,8 @@ test("迟到的旧元数据不能与新结果混合", async () => {
   metadata.resolve({ database: "db_a", schema: "old_schema", table: "users", columns });
   await first;
   assert.equal(tab().resultSource?.connectionId, "B");
-  assert.equal(tab().editContext?.schema, "new_schema");
+  assert.equal(tab().resultSource?.refreshSql, 'SELECT * FROM "new_schema"."users"');
+  assert.equal(tab().editContext, null);
 });
 
 test("旧请求失败不能清除新查询的运行状态", async () => {
@@ -211,16 +215,12 @@ test("旧结果的待提交请求不能应用到后续查询", async () => {
   assert.equal(calls.batches.length, 0);
 });
 
-test("保存进行中启动了新查询时，保存完成不会重新执行旧查询", async () => {
-  const { service, calls, actions } = harness();
-  const saving = deferred<number>();
-  service.executeBatch = async (...args) => { calls.batches.push(args); return saving.promise; };
+test("网格拒绝写入后不会触发自动刷新或覆盖后续查询", async () => {
+  const { calls, actions } = harness();
   await actions.execute("tab", "SELECT * FROM users", A);
-  const save = actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE users SET id=2 WHERE id=1"]);
+  await assert.rejects(actions.applyEdits("tab", tab().resultSource!.taskId, ["UPDATE users SET id=2 WHERE id=1"]), /GRID_EDIT_CONTEXT_REQUIRED/);
   await actions.execute("tab", "SELECT * FROM users", B);
-  saving.resolve(1);
-  await save;
-  assert.equal(calls.batches[0][0], "A");
+  assert.equal(calls.batches.length, 0);
   assert.equal(calls.queries.length, 2);
   assert.equal(tab().resultSource?.connectionId, "B");
 });
@@ -245,27 +245,104 @@ test("关闭页签后迟到结果不会重新创建页签", async () => {
   service.executeQuery = async () => { entered.resolve(); return waiting.promise; };
   const running = actions.execute("tab", "SELECT * FROM users", A);
   await entered.promise;
-  useEditorStore.getState().closeTab("tab");
+  await useEditorStore.getState().closeTab("tab");
   waiting.resolve(result());
   await running;
   assert.deepEqual(useEditorStore.getState().tabs, []);
 });
 
-test("批量执行绑定开始时的来源，不继承旧查询的取消 ID", async () => {
+test("批量执行绑定开始时的来源，并使用新的取消 ID 与任务 UUID", async () => {
   const { service, calls, actions } = harness();
   await actions.execute("tab", "SELECT * FROM users", A);
+  const previous = tab().resultSource!;
   const waiting = deferred<number>();
   service.executeBatch = async (...args) => { calls.batches.push(args); return waiting.promise; };
   const running = actions.executeAll("tab", ["UPDATE users SET id=2"], A);
   useConnectionStore.setState({ activeConnection: "B", selectedDatabase: "db_b" });
   assert.equal(tab().execution?.connectionId, "A");
-  assert.equal(tab().execution?.queryId, undefined);
+  const execution = tab().execution!;
+  assert.notEqual(execution.queryId, previous.queryId);
+  assert.notEqual(execution.backendTaskId, previous.backendTaskId);
   await actions.cancel("tab");
-  assert.equal(calls.cancels.length, 0);
+  assert.deepEqual(calls.cancels, [["A", execution.queryId, execution.backendTaskId]]);
   waiting.resolve(1);
   await running;
   assert.equal(tab().resultSource?.connectionId, "A");
   assert.equal(tab().editContext, null);
+});
+
+test("不支持取消的驱动不会下发请求或声称任务已停止", async () => {
+  const { service, calls, actions } = harness();
+  const waiting = deferred<QueryResult>();
+  const entered = deferred<void>();
+  service.executeQuery = async () => { entered.resolve(); return waiting.promise; };
+  const running = actions.execute("tab", "SELECT 1", { ...A, driverType: "mssql" });
+  await entered.promise;
+  assert.equal(tab().execution?.canCancel, false);
+  await assert.rejects(actions.cancel("tab"), /不支持取消/);
+  assert.equal(calls.cancels.length, 0);
+  assert.equal(tab().isExecuting, true);
+  waiting.resolve(result());
+  await running;
+});
+
+test("后端能力优先，能力不可用时禁止取消且仍允许查询返回", async () => {
+  const { service, calls } = harness();
+  const entered = deferred<void>(); const waiting = deferred<QueryResult>();
+  service.executeQuery = async () => { entered.resolve(); return waiting.promise; };
+  const actions = createQueryActions(useEditorStore, { ...service, getSessionCapabilities: async () => ({ cancellation: false, cancellationReason: "未验证", exclusiveSession: true, resetPolicy: "full" as const }) });
+  const running = actions.execute("tab", "SELECT 1", A);
+  await entered.promise;
+  await assert.rejects(actions.cancel("tab"), /不支持取消/);
+  assert.equal(tab().execution?.canCancel, false);
+  assert.equal(calls.cancels.length, 0);
+  waiting.resolve(result()); await running;
+});
+
+test("取消请求失败保留运行状态并允许再次请求", async () => {
+  const { service, actions } = harness();
+  const entered = deferred<void>(); const waiting = deferred<QueryResult>(); const cancellation = deferred<void>();
+  service.executeQuery = async () => { entered.resolve(); return waiting.promise; };
+  service.cancelQuery = async () => cancellation.promise;
+  const running = actions.execute("tab", "SELECT 1", A);
+  await entered.promise;
+  const cancel = actions.cancel("tab");
+  assert.equal(tab().cancelRequested, true);
+  assert.equal(tab().isExecuting, true);
+  cancellation.reject(new Error("取消连接超时"));
+  await assert.rejects(cancel, /取消连接超时/);
+  assert.equal(tab().cancelRequested, false);
+  assert.equal(tab().isExecuting, true);
+  waiting.resolve(result()); await running;
+});
+
+test("旧任务的取消失败不能清除新任务已请求取消的状态", async () => {
+  const { service, actions } = harness();
+  const first = deferred<QueryResult>(); const second = deferred<QueryResult>();
+  const enteredFirst = deferred<void>(); const enteredSecond = deferred<void>(); const rejectedCancel = deferred<void>();
+  let queries = 0;
+  service.executeQuery = async () => { if (++queries === 1) { enteredFirst.resolve(); return first.promise; } enteredSecond.resolve(); return second.promise; };
+  const firstRun = actions.execute("tab", "SELECT 1", A); await enteredFirst.promise;
+  const oldToken = tab().execution!.backendTaskId;
+  service.cancelQuery = async (_conn, _qid, taskId) => taskId === oldToken ? rejectedCancel.promise : undefined;
+  const firstCancel = actions.cancel("tab");
+  const secondRun = actions.execute("tab", "SELECT 2", B); await enteredSecond.promise;
+  await actions.cancel("tab"); assert.equal(tab().cancelRequested, true);
+  rejectedCancel.reject(new Error("旧任务取消请求迟到失败")); await assert.rejects(firstCancel, /迟到失败/);
+  assert.equal(tab().cancelRequested, true); assert.equal(tab().execution?.connectionId, "B");
+  second.resolve(result(2)); await secondRun; first.resolve(result(1)); await firstRun;
+  assert.equal(tab().resultSource?.connectionId, "B"); assert.deepEqual(tab().result?.rows, [{ values: [2] }]);
+});
+
+test("后端任务回执错配时拒绝展示为当前执行成功", async () => {
+  const { service, actions } = harness();
+  service.executeQuery = async () => ({ ...result(), task: {
+    protocolVersion: 1, taskId: crypto.randomUUID(), queryId: 1, connectionId: "B", connectionGeneration: "g", operation: "query",
+    phase: "succeeded", sequence: 4, cancelRequested: false, capabilities: null, sessionId: null, startedAt: 1, completedAt: 2,
+    commitState: "notApplicable", rollbackState: "notStarted", cleanupState: "succeeded", errorCode: null,
+  } });
+  await assert.rejects(actions.execute("tab", "SELECT 1", A), /任务回执.*不一致/);
+  assert.match(tab().result?.error ?? "", /任务回执/); assert.equal(tab().isExecuting, false);
 });
 
 test("同一毫秒内的执行仍使用不同的任务与取消 ID", async () => {
@@ -277,4 +354,56 @@ test("同一毫秒内的执行仍使用不同的任务与取消 ID", async () =>
     await actions.execute("tab", "SELECT * FROM users", A);
   } finally { Date.now = original; }
   assert.notEqual(calls.queries[0][3], calls.queries[1][3]);
+});
+
+for (const sql of [
+  "SELECT id + 1 AS id, name FROM users", "SELECT id, id FROM users",
+  "SELECT COUNT(*) AS id FROM users", "SELECT a.id FROM users a JOIN other b ON a.id=b.id",
+]) {
+  test(`任意 SQL 不授予网格写权限：${sql}`, async () => {
+    const { actions, calls } = harness();
+    await actions.execute("tab", sql, A);
+    assert.equal(tab().editContext, null);
+    await assert.rejects(actions.applyEdits("tab", tab().resultSource?.taskId, ["DELETE FROM users WHERE id=2"]), /GRID_EDIT_CONTEXT_REQUIRED/);
+    assert.equal(calls.batches.length, 0);
+  });
+}
+
+function dirtyDraft(save: () => Promise<void> = async () => {}) {
+  const key = queryDraftKey("tab");
+  useGridDraftStore.getState().ensureDraft(key, result(), null, save);
+  useGridDraftStore.getState().updateDraft(key, () => ({ edits: { "0:0": "9" } }));
+  return key;
+}
+
+test("草稿取消重跑，不发送新查询也不清空草稿", async () => {
+  const { actions, calls } = harness();
+  const key = dirtyDraft();
+  const running = actions.execute("tab", "SELECT * FROM users", A);
+  assert.equal(calls.queries.length, 0);
+  await useGridDraftStore.getState().chooseNavigation("cancel");
+  await running;
+  assert.equal(calls.queries.length, 0);
+  assert.equal(useGridDraftStore.getState().drafts[key].edits["0:0"], "9");
+});
+
+test("草稿保存失败停止整页执行，保留数据和错误", async () => {
+  const { actions, calls } = harness();
+  const key = dirtyDraft(async () => { throw new Error("保存失败"); });
+  const running = actions.executeAll("tab", ["DELETE FROM users"], A);
+  await useGridDraftStore.getState().chooseNavigation("save");
+  await running;
+  assert.equal(calls.batches.length, 0);
+  assert.equal(useGridDraftStore.getState().drafts[key].edits["0:0"], "9");
+  assert.match(useGridDraftStore.getState().drafts[key].error!, /保存失败/);
+});
+
+test("放弃草稿后才启动新任务", async () => {
+  const { actions, calls } = harness();
+  dirtyDraft();
+  const running = actions.execute("tab", "SELECT 1", B);
+  await useGridDraftStore.getState().chooseNavigation("discard");
+  await running;
+  assert.equal(calls.queries.length, 1);
+  assert.equal(tab().resultSource?.connectionId, "B");
 });

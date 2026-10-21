@@ -4,6 +4,13 @@ use crate::models::ConnectionConfig;
 use tauri::State;
 
 #[tauri::command]
+pub fn credential_health(
+    manager: State<'_, ConnectionPoolManager>,
+) -> crate::store::CredentialHealth {
+    manager.credential_health()
+}
+
+#[tauri::command]
 pub async fn connection_test(config: ConnectionConfig) -> Result<(), String> {
     db_test_connection(&config).await.map_err(|e| e.to_string())
 }

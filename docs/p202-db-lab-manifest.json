@@ -1,0 +1,57 @@
+{
+  "GeneratedUtc": "2026-10-20T08:03:35.5199654Z",
+  "Purpose": "本轮真实数据库验收专用实例；无系统服务安装，不改既有数据库。",
+  "LabRoot": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb",
+  "Credentials": "连接串与密码运行时仅保存于 ACL 受限的 ignored 文件；已随本轮实验目录删除，公开清单不含凭据。",
+  "Instances": [
+    {
+      "Engine": "mysql57",
+      "Version": "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqld.exe  Ver 5.7.44 for Win64 on x86_64 (MySQL Community Server (GPL))",
+      "Host": "127.0.0.1",
+      "Port": 59570,
+      "Pid": 53120,
+      "StartedUtc": "2026-10-20T07:47:32.6557198Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb\\mysql57-data",
+      "Bin": "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin",
+      "Database": "sqlink_test_cfaa13f634ac43319e3fc6e4bc001bae",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb\\test-env.ps1"
+    },
+    {
+      "Engine": "postgres",
+      "Version": "postgres (PostgreSQL) 17.11",
+      "Host": "127.0.0.1",
+      "Port": 58181,
+      "Pid": 34484,
+      "StartedUtc": "2026-10-20T07:49:54.3632163Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb\\postgres-data",
+      "Bin": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb\\postgresql-runtime\\pgsql\\bin",
+      "Database": "sqlink_test_ada707c682d24e1e8fd3f491c6fb9335",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb\\test-env.ps1"
+    }
+  ],
+  "DownloadEvidence": [
+    {
+      "Engine": "PostgreSQL 17.11",
+      "Distribution": "PostgreSQL 官方推荐的 EDB Windows 二进制分发",
+      "SourceUrl": "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260616",
+      "Archive": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-b959238519aa4bd38b1acdd41ce5a8eb\\postgresql-17.11-windows-x64-binaries.zip",
+      "DownloadedUtc": "2026-10-20T07:49:05.7129823Z",
+      "Bytes": 381531864,
+      "Sha256": "80379B2C04D51C30225532E0AE04509899141E9957ED096FE749D7FD9DF8F82F",
+      "LocalFingerprintMatched": true,
+      "FingerprintBasis": "长度和 SHA256 与前轮本地下载记录一致；不是厂商公布的校验值，未声称完成厂商签名或厂商校验。"
+    }
+  ],
+  "SqlServer": "用户已明确无独立测试实例；本轮未探测、安装或启动 SQL Server，实库未运行。",
+  "Cleanup": {
+    "CompletedUtc": "2026-10-20T08:06:23.6204149Z",
+    "GracefullyStopped": true,
+    "DirectoriesDeleted": true,
+    "CredentialsDeleted": true,
+    "CheckedResolvedPaths": true,
+    "CheckedReparsePoints": true,
+    "CheckedOwningProcesses": true
+  }
+}

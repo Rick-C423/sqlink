@@ -1,0 +1,167 @@
+{
+  "GeneratedUtc": "2026-10-20T07:25:19.3889157Z",
+  "Scope": "P2 01 读取预算第一批，本地未提交工作区；不代表整个 P2 01 或 P2 完成。",
+  "GitHead": "53abb8f53be5a2513482d0118787eabba83d4280",
+  "Limits": {
+    "Rows": 10000,
+    "RetainedAndEncodedBytes": 16777216,
+    "RawCellBytes": 1048576,
+    "ProcessRssHardLimit": false,
+    "WireRowPreallocationBounded": false
+  },
+  "Frontend": {
+    "Passed": 147,
+    "Failed": 0,
+    "Log": ".zcode/p2-budget-frontend.log",
+    "ProductionBuild": "通过，仅既有 Monaco 大 chunk 提示",
+    "BuildLog": ".zcode/p2-budget-build.log"
+  },
+  "Rust": {
+    "UnitPassed": 151,
+    "UnitIgnored": 10,
+    "SqliteAndLocalIntegrationPassed": 51,
+    "LegacyNetworkEarlyReturnExcluded": 3,
+    "Failed": 0,
+    "Log": ".zcode/p2-budget-rust.log",
+    "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --lib --tests",
+    "NewSqliteBudgetPassed": 6,
+    "NewSqliteIncludedInIntegration": true,
+    "PgWireStub": "默认单元测试通过，协议桩非实库",
+    "MsSqlBudgetLogicalAndMockPassed": 8,
+    "MsSqlIncludedInUnit": true
+  },
+  "MySqlRealDatabase": {
+    "Version": "5.7.44",
+    "Passed": 6,
+    "Failed": 0,
+    "BudgetPassed": 2,
+    "BudgetCases": [
+      "test mysql_stream_limit_closes_unread_lease_without_draining_slow_tail ... ok",
+      "test mysql_byte_and_cell_limits_preserve_whole_aligned_rows ... ok"
+    ],
+    "CompatibilityCases": [
+      {
+        "Target": "integration",
+        "Name": "mysql_full_flow",
+        "ExitCode": 0,
+        "Summary": [
+          "test mysql_full_flow ... ok",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.05s"
+        ]
+      },
+      {
+        "Target": "typed_binding_mysql_network",
+        "Name": "mysql_native_binding_round_trip",
+        "ExitCode": 0,
+        "Summary": [
+          "test mysql_native_binding_round_trip ... ok",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+        ]
+      },
+      {
+        "Target": "result_context_network",
+        "Name": "mysql_controlled_result_context",
+        "ExitCode": 0,
+        "Summary": [
+          "test mysql_controlled_result_context ... ok",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.04s"
+        ]
+      },
+      {
+        "Target": "session_pg_mysql",
+        "Name": "mysql_session_isolation_cancellation",
+        "ExitCode": 0,
+        "Summary": [
+          "test mysql_session_isolation_cancellation ... ok",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.06s"
+        ]
+      }
+    ],
+    "Manifest": "p2-mysql-lab-manifest.json",
+    "Mysql84RunThisRound": false,
+    "EditingAllowlistUnchanged": true
+  },
+  "PostgresRealDatabase": {
+    "Version": "17.11",
+    "Passed": 8,
+    "Failed": 0,
+    "Cases": [
+      {
+        "Name": "新增PG查询预算实库",
+        "Passed": 2,
+        "Failed": 0,
+        "ExitCode": 0,
+        "RealDatabase": true,
+        "Log": ".zcode/p2-budget-postgres-query.log"
+      },
+      {
+        "Name": "既有PG会话隔离取消实库",
+        "Passed": 1,
+        "Failed": 0,
+        "ExitCode": 0,
+        "RealDatabase": true,
+        "Log": ".zcode/p2-budget-postgres-session.log"
+      },
+      {
+        "Name": "既有PG原生类型绑定实库",
+        "Passed": 1,
+        "Failed": 0,
+        "ExitCode": 0,
+        "RealDatabase": true,
+        "Log": ".zcode/p2-budget-postgres-typed.log"
+      },
+      {
+        "Name": "既有PG受控结果上下文连续性实库",
+        "Passed": 1,
+        "Failed": 0,
+        "ExitCode": 0,
+        "RealDatabase": true,
+        "Log": ".zcode/p2-budget-postgres-context.log"
+      },
+      {
+        "Name": "既有PG提交安全连续性实库",
+        "Passed": 3,
+        "Failed": 0,
+        "ExitCode": 0,
+        "RealDatabase": true,
+        "Log": ".zcode/p2-budget-postgres-commit.log"
+      }
+    ],
+    "Manifest": "p2-postgres-lab-manifest.json"
+  },
+  "SqlServer": {
+    "BudgetIntegrationCompiled": true,
+    "RealDatabaseRun": false,
+    "Reason": "用户无独立测试实例",
+    "GridEditing": "维持既有只读限制"
+  },
+  "AdditionalChecks": {
+    "RustFmt": "通过",
+    "GitDiffCheck": "通过",
+    "CiYaml": "本地解析与测试入口静态核对通过，GitHub 未运行",
+    "DesktopAcceptanceThisRound": "未运行"
+  },
+  "Workspace": {
+    "ExistingUncommittedChangesPreserved": true,
+    "Committed": false,
+    "Pushed": false,
+    "Published": false,
+    "ExeReplaced": false,
+    "CurrentExeSha256": "8F0B3A90B53DD7E148821E2557DB5C187309236F634BAE5088F5508CC9FBCA55",
+    "GridEditingSafetyRestrictionsPreserved": true
+  },
+  "Cleanup": {
+    "CompletedUtc": "2026-10-20T07:23:56.9732937Z",
+    "TemporaryDirectoriesDeleted": 4,
+    "DeletedBytes": 4469415294,
+    "BothTestInstancesGracefullyStopped": true,
+    "PathsAndReparseAndProcessesChecked": true,
+    "UserDatabaseServicesChanged": false
+  },
+  "Remaining": [
+    "P2 01 首屏与 COUNT 解耦、DatasetController、深分页体验",
+    "P2 02/03 导出、转储和元数据通道流式改造",
+    "独立 SQL Server 实库与本轮桌面验收",
+    "进程峰值 RSS 和首屏基准测试"
+  ]
+}
