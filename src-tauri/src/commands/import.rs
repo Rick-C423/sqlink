@@ -66,7 +66,7 @@ pub async fn sql_import_file(
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<ImportSummary, String> {
     // 兼容旧 IPC 的参数与返回值，同时避免绕过新导入生命周期。
-    let plan = crate::import_jobs::preview(
+    let plan = Box::pin(crate::import_jobs::preview(
         &manager,
         crate::import_jobs::ImportPlanRequest {
             connection_id,
@@ -75,15 +75,15 @@ pub async fn sql_import_file(
             on_conflict,
             task_id: uuid::Uuid::new_v4().to_string(),
         },
-    )
+    ))
     .await?;
-    let report = crate::import_jobs::execute(
+    let report = Box::pin(crate::import_jobs::execute(
         &manager,
         crate::import_jobs::ImportExecuteRequest {
             plan_id: plan.plan_id,
             task_id: uuid::Uuid::new_v4().to_string(),
         },
-    )
+    ))
     .await?;
     if let Some(message) = report.message {
         return Err(import_error(
@@ -108,7 +108,8 @@ pub async fn sql_import_preview(
     request: crate::import_jobs::ImportPlanRequest,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<crate::import_jobs::ImportPlan, String> {
-    crate::import_jobs::preview(&manager, request).await
+    // 在 IPC 边界隔离业务 Future 的内联大小，避免 release 调度链按值多次搬运。
+    Box::pin(crate::import_jobs::preview(&manager, request)).await
 }
 
 #[tauri::command]
@@ -116,7 +117,7 @@ pub async fn sql_import_execute(
     request: crate::import_jobs::ImportExecuteRequest,
     manager: State<'_, ConnectionPoolManager>,
 ) -> Result<crate::import_jobs::ImportReport, String> {
-    crate::import_jobs::execute(&manager, request).await
+    Box::pin(crate::import_jobs::execute(&manager, request)).await
 }
 
 #[tauri::command]
@@ -395,3 +396,4 @@ mod import_rewrite_tests {
         );
     }
 }
+

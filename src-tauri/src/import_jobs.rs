@@ -275,7 +275,9 @@ async fn scan(
 ) -> Result<(Vec<u8>, u64, bool, bool), String> {
     file.seek(SeekFrom::Start(0)).map_err(text_error)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0u8; 65536];
+    // 跨 await 的数组会内联进入整个 IPC Future，在 Tauri release 多层传参时耗尽桌面栈。
+    // 直接从堆分配固定容量，不用 Box::new([0; N]) 先在栈上构造大数组。
+    let mut buffer = vec![0u8; 65536];
     let mut read = 0;
     loop {
         if task.cancel_requested() {
@@ -908,6 +910,53 @@ fn mark_sending(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn import_ipc_futures_have_bounded_inline_storage() {
+        use super::*;
+        use std::future::Future;
+        // 只推导返回类型，不先在测试线程构造可能超过桌面栈容量的 Future。
+        fn size2<A, B, F, Fut>(_: F) -> usize
+        where
+            F: FnOnce(A, B) -> Fut,
+            Fut: Future,
+        {
+            std::mem::size_of::<Fut>()
+        }
+        fn size4<A, B, C, D, F, Fut>(_: F) -> usize
+        where
+            F: FnOnce(A, B, C, D) -> Fut,
+            Fut: Future,
+        {
+            std::mem::size_of::<Fut>()
+        }
+        let scan_bytes = size4::<&'static mut File, bool, &'static TaskGuard, u64, _, _>(scan);
+        let preview_bytes =
+            size2::<&'static ConnectionPoolManager, ImportPlanRequest, _, _>(preview);
+        let execute_bytes =
+            size2::<&'static ConnectionPoolManager, ImportExecuteRequest, _, _>(execute);
+        let snapshot_bytes = size2::<&'static ConnectionPoolManager, &'static str, _, _>(
+            ConnectionPoolManager::get_connection_snapshot,
+        );
+        let command_preview =
+            size2::<ImportPlanRequest, tauri::State<'static, ConnectionPoolManager>, _, _>(
+                crate::commands::import::sql_import_preview,
+            );
+        let command_execute =
+            size2::<ImportExecuteRequest, tauri::State<'static, ConnectionPoolManager>, _, _>(
+                crate::commands::import::sql_import_execute,
+            );
+        println!("导入异步状态内联字节：scan={scan_bytes}, preview={preview_bytes}, execute={execute_bytes}, snapshot={snapshot_bytes}, commandPreview={command_preview}, commandExecute={command_execute}");
+        // Windows EXE 主线程预留栈仅 1 MiB；为 Tauri 多层传参及其它栈帧留足空间。
+        for (name, bytes) in [
+            ("scan", scan_bytes),
+            ("preview", preview_bytes),
+            ("execute", execute_bytes),
+            ("commandPreview", command_preview),
+            ("commandExecute", command_execute),
+        ] {
+            assert!(bytes < 16 * 1024, "{name} 的 Future 内联状态过大：{bytes}");
+        }
+    }
     use super::*;
     #[test]
     fn format_check_distinguishes_literals_comments_and_client_protocol() {
@@ -1091,3 +1140,4 @@ fn terminal_result(
         (TaskPhase::Succeeded, None, None)
     }
 }
+

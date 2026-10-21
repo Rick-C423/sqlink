@@ -92,7 +92,7 @@ jobs:
       - name: 完整元数据身份、结构修订与导出来源 SQLite 回归
         run: cargo test --manifest-path src-tauri/Cargo.toml --test metadata_sqlite --test metadata_service
       - name: 首屏统计解耦、分页游标及导入任务恢复 SQLite 回归
-        run: cargo test --manifest-path src-tauri/Cargo.toml --test dataset_sqlite --test import_job_sqlite --test import_job_recovery
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test dataset_sqlite --test import_job_sqlite --test import_job_recovery --test import_job_stack
       - name: PostgreSQL 与 MySQL 分页统计、导入预检及取消实库回归
         run: cargo test --manifest-path src-tauri/Cargo.toml --test dataset_network --test import_job_pg_mysql -- --ignored
       - name: PostgreSQL 非默认 schema 元数据与导出实库回归
