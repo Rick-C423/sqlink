@@ -396,4 +396,3 @@ mod import_rewrite_tests {
         );
     }
 }
-

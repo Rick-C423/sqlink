@@ -112,4 +112,3 @@ fn import_preview_and_execution_work_on_one_mib_thread_stack() {
         .block_on(manager.disconnect("stack-test"))
         .unwrap();
 }
-

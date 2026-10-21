@@ -1140,4 +1140,3 @@ fn terminal_result(
         (TaskPhase::Succeeded, None, None)
     }
 }
-
