@@ -1,7 +1,8 @@
 //! 后端可信结果注册表。公开对象只含随机引用，行主键及原值始终保留在进程内。
 
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
@@ -52,6 +53,9 @@ pub struct ResultContext {
     pub connection_id: String,
     pub connection_generation: String,
     pub source: ResultSource,
+    /// 仅供恢复草稿前比较同一后端对象；不作为提交授权，也不含行身份或原值。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_identity: Option<String>,
     pub columns: Vec<ResultColumn>,
     pub edit_policy: EditPolicy,
     pub created_at: i64,
@@ -87,11 +91,24 @@ pub struct StoredRowIdentity {
     pub original_values: Vec<Option<crate::typed_value::TypedValue>>,
 }
 
+/// 仅由回执注册表原子登记的未执行记录生成，不能从普通错误码推断。
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitExecutionEvidence {
+    pub protocol_version: u32,
+    pub change_set_id: String,
+    pub result_id: String,
+    pub revision: u64,
+    pub commit_state: &'static str,
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextError {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_evidence: Option<CommitExecutionEvidence>,
 }
 
 impl ContextError {
@@ -99,6 +116,7 @@ impl ContextError {
         Self {
             code: code.into(),
             message: message.into(),
+            commit_evidence: None,
         }
     }
 }
@@ -151,12 +169,27 @@ struct StoredContext {
 #[derive(Default)]
 struct RegistryState {
     results: HashMap<String, StoredContext>,
+    // 独立于结果详情的有界发行历史；淘汰后只拒绝签发未执行证明。
+    issued_ids: HashSet<String>,
+    issued_order: VecDeque<String>,
     rows: usize,
     bytes: usize,
     next_order: u128,
 }
 
 impl RegistryState {
+    fn remember_issued(&mut self, result_id: &str) {
+        const MAX_ISSUED_IDS: usize = 4096;
+        if self.issued_ids.insert(result_id.to_owned()) {
+            self.issued_order.push_back(result_id.to_owned());
+        }
+        while self.issued_order.len() > MAX_ISSUED_IDS {
+            if let Some(oldest) = self.issued_order.pop_front() {
+                self.issued_ids.remove(&oldest);
+            }
+        }
+    }
+
     fn remove(&mut self, result_id: &str) {
         if let Some(removed) = self.results.remove(result_id) {
             self.rows -= removed.row_count;
@@ -314,6 +347,22 @@ impl ResultContextRegistry {
             seed.reason_codes
                 .push("PARAMETERIZED_COMMIT_REQUIRED".to_owned());
         }
+        let recovery_identity = object_identity
+            .as_ref()
+            .map(|identity| {
+                // JSON 元组保留字段边界；随机结果/列 ID、时间、行键和原值不参与对象摘要。
+                serde_json::to_vec(&(
+                    "result-recovery-identity-v1",
+                    &seed.connection_id,
+                    &seed.connection_generation,
+                    &seed.source,
+                    identity,
+                    &seed.metadata_fingerprint,
+                ))
+                .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                .map_err(|_| ContextError::new("INVALID_CONTEXT_SEED", "恢复对象身份无法编码"))
+            })
+            .transpose()?;
         let context = ResultContext {
             protocol_version: 1,
             result_id: Uuid::new_v4().to_string(),
@@ -321,6 +370,7 @@ impl ResultContextRegistry {
             connection_id: seed.connection_id,
             connection_generation: seed.connection_generation,
             source: seed.source,
+            recovery_identity,
             columns: seed.columns,
             edit_policy: policy.filter(|_| authorized).unwrap_or_else(|| EditPolicy {
                 allowed_operations: vec![],
@@ -405,10 +455,15 @@ impl ResultContextRegistry {
                 order,
             },
         );
+        state.remember_issued(&context.result_id);
         Ok(PublishedResultContext {
             context,
             row_handles,
         })
+    }
+
+    pub(crate) fn was_issued(&self, result_id: &str) -> Result<bool, ContextError> {
+        Ok(self.lock()?.issued_ids.contains(result_id))
     }
 
     pub fn get_context(
@@ -662,6 +717,119 @@ mod tests {
             &[published.row_handles[1].clone().unwrap()],
             now,
         )
+    }
+
+    #[test]
+    fn recovery_identity_is_stable_for_one_object_and_changes_with_its_full_scope() {
+        let registry = ResultContextRegistry::default();
+        let first = registry
+            .register_with_identity(
+                seed(),
+                vec![Some(identity())],
+                0,
+                Some("仅后端可见的对象身份".into()),
+                None,
+            )
+            .unwrap();
+        let expected = first.context.recovery_identity.as_ref().unwrap();
+        assert_eq!(expected.len(), 64);
+        assert!(expected.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let mut same_seed = seed();
+        same_seed.revision += 1;
+        same_seed.columns[0].column_id = Uuid::new_v4().to_string();
+        let mut changed_row = identity();
+        changed_row.keys[0].1 = RowIdentityValue::Text("另一个原始主键".into());
+        changed_row.original_values[0] = Some(RowIdentityValue::Text("另一份原值".into()));
+        let repeated = registry
+            .register_with_identity(
+                same_seed,
+                vec![Some(changed_row)],
+                1,
+                Some("仅后端可见的对象身份".into()),
+                None,
+            )
+            .unwrap();
+        assert_ne!(first.context.result_id, repeated.context.result_id);
+        assert_eq!(
+            first.context.recovery_identity,
+            repeated.context.recovery_identity
+        );
+        for changed_part in 0..8 {
+            let mut changed_seed = seed();
+            let mut object = "仅后端可见的对象身份";
+            match changed_part {
+                0 => changed_seed.connection_id = "另一连接".into(),
+                1 => changed_seed.connection_generation = Uuid::new_v4().to_string(),
+                2 => changed_seed.source.database = "另一数据库".into(),
+                3 => changed_seed.source.schema = Some("另一架构".into()),
+                4 => changed_seed.source.table = "另一表".into(),
+                5 => changed_seed.source.kind = "view".into(),
+                6 => changed_seed.metadata_fingerprint = "另一元数据指纹".into(),
+                _ => object = "重建后的后端对象身份",
+            }
+            let changed = registry
+                .register_with_identity(changed_seed, vec![], 1, Some(object.into()), None)
+                .unwrap();
+            assert_ne!(changed.context.recovery_identity.as_ref(), Some(expected));
+        }
+        let public = serde_json::to_string(&first).unwrap();
+        for secret in [
+            "仅后端可见的对象身份",
+            "secret-key",
+            "secret-original",
+            "后端元数据指纹",
+        ] {
+            assert!(!public.contains(secret));
+        }
+        let no_identity = register(&registry, 1);
+        assert!(no_identity.context.recovery_identity.is_none());
+        assert!(serde_json::to_value(&no_identity.context)
+            .unwrap()
+            .get("recoveryIdentity")
+            .is_none());
+    }
+
+    #[test]
+    fn ordinary_errors_preserve_the_existing_ipc_shape() {
+        assert_eq!(
+            serde_json::to_value(ContextError::new("EXAMPLE", "普通错误")).unwrap(),
+            serde_json::json!({"code": "EXAMPLE", "message": "普通错误"})
+        );
+    }
+
+    #[test]
+    fn issued_history_survives_release_and_expiry_but_is_local_and_bounded() {
+        let registry = ResultContextRegistry::new(Limits {
+            max_contexts: 1,
+            ..Limits::default()
+        });
+        let released = register(&registry, 0);
+        registry.release(&released.context.result_id, 7, 1).unwrap();
+        assert!(registry.was_issued(&released.context.result_id).unwrap());
+        let expired = register(&registry, 0);
+        registry.stats(expired.context.expires_at).unwrap();
+        assert!(registry.was_issued(&expired.context.result_id).unwrap());
+        assert!(!ResultContextRegistry::default()
+            .was_issued(&expired.context.result_id)
+            .unwrap());
+
+        // 发行历史的淘汰不能删除仍在读取预算内的结果。
+        for _ in 0..4096 {
+            register(&registry, 0);
+        }
+        let state = registry.lock().unwrap();
+        assert_eq!(state.issued_ids.len(), 4096);
+        assert_eq!(state.issued_order.len(), 4096);
+        assert!(!state.issued_ids.contains(&released.context.result_id));
+        assert!(!state.issued_ids.contains(&expired.context.result_id));
+        let latest = state.issued_order.back().unwrap().clone();
+        drop(state);
+        assert!(registry.get_context(&latest, 7, 1).is_ok());
+        let before = registry.lock().unwrap().issued_order.clone();
+        let mut invalid = seed();
+        invalid.source.kind = "无效类型".into();
+        assert!(registry.register(invalid, vec![], 1).is_err());
+        assert_eq!(registry.lock().unwrap().issued_order, before);
     }
 
     #[test]

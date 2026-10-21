@@ -1,4 +1,4 @@
-import type { CommitReceipt } from "@/types/commitReceipt";
+import type { CommitReceipt, RejectedBeforeExecution } from "@/types/commitReceipt";
 import type { ChangeSetRequest } from "@/types/typedValue";
 import type { ResultContext } from "@/types/resultContext";
 import { isTypedValue } from "@/lib/typedValue";
@@ -9,6 +9,20 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 const nullableCode = (value: unknown) => value === null || text(value);
 const count = (value: unknown) => value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
 const completion = (value: unknown) => ["notStarted", "succeeded", "failed", "unknown"].includes(value as string);
+
+/** 只接受绑定原请求的后端证明，不能根据错误码、异常文本或查无回执推断未执行。 */
+export function rejectedBeforeExecution(value: unknown, request: ChangeSetRequest): RejectedBeforeExecution | undefined {
+  if (!record(value) || !text(value.code) || !text(value.message) || !record(value.commitEvidence)) return undefined;
+  const proof = value.commitEvidence;
+  if (proof.protocolVersion !== 1 || proof.commitState !== "notStarted" ||
+    !uuid.test(request.changeSetId) || !uuid.test(request.resultId) ||
+    proof.changeSetId !== request.changeSetId || proof.resultId !== request.resultId ||
+    !Number.isSafeInteger(request.revision) || request.revision < 1 || proof.revision !== request.revision) return undefined;
+  return { code: value.code, message: value.message, commitEvidence: {
+    protocolVersion: 1, changeSetId: request.changeSetId, resultId: request.resultId,
+    revision: request.revision, commitState: "notStarted",
+  } };
+}
 
 /** 校验身份、每个操作及事务事实；任何损坏都交给调用方按结果未知处理。 */
 export function validateCommitReceipt(

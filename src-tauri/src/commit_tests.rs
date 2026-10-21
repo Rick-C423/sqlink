@@ -399,6 +399,145 @@ async fn identical_retry_returns_original_receipt_and_changed_content_cannot_reu
 }
 
 #[tokio::test]
+async fn expired_and_released_contexts_prove_rejection_without_database_changes() {
+    for expire in [true, false] {
+        let (manager, page) = fixture().await;
+        let before = stored(&manager).await;
+        let req = one_update(&page, "1", "不得写入");
+        if expire {
+            assert_eq!(
+                manager
+                    .result_contexts
+                    .get_context(&req.result_id, req.revision, page.context.expires_at)
+                    .unwrap_err()
+                    .code,
+                "RESULT_CONTEXT_EXPIRED"
+            );
+        } else {
+            manager
+                .result_contexts
+                .release(&req.result_id, req.revision, now())
+                .unwrap();
+        }
+        let rejection = commit_internal(&manager, req.clone(), None, true)
+            .await
+            .unwrap_err();
+        assert_eq!(rejection.code, "RESULT_CONTEXT_NOT_FOUND");
+        let evidence = rejection.commit_evidence.as_ref().unwrap();
+        assert_eq!(evidence.change_set_id, req.change_set_id);
+        assert_eq!(evidence.result_id, req.result_id);
+        assert_eq!(evidence.revision, req.revision);
+        assert_eq!(evidence.commit_state, "notStarted");
+        assert_eq!(stored(&manager).await, before);
+        assert_eq!(
+            commit_internal(&manager, req.clone(), None, true)
+                .await
+                .unwrap_err(),
+            rejection
+        );
+        assert_eq!(
+            manager
+                .commit_receipts
+                .get(&req.change_set_id, &req.result_id, req.revision)
+                .unwrap_err(),
+            rejection
+        );
+        let mut changed = req;
+        if let ChangeOperation::Update { changes, .. } = &mut changed.operations[0] {
+            *changes = change(&page, &[("payload", TypedValue::Text("不同内容".into()))]);
+        }
+        let reused = commit_internal(&manager, changed, None, true)
+            .await
+            .unwrap_err();
+        assert_eq!(reused.code, "CHANGESET_ID_REUSED");
+        assert!(reused.commit_evidence.is_none());
+        assert_eq!(stored(&manager).await, before);
+    }
+}
+
+#[tokio::test]
+async fn invalid_handles_before_reservation_have_proof_but_invalid_shape_does_not() {
+    let (manager, page) = fixture().await;
+    let before = stored(&manager).await;
+    let mut req = one_update(&page, "1", "不得写入");
+    if let ChangeOperation::Update { row_handle, .. } = &mut req.operations[0] {
+        *row_handle = Uuid::new_v4().to_string();
+    }
+    let rejection = commit_internal(&manager, req.clone(), None, true)
+        .await
+        .unwrap_err();
+    assert_eq!(rejection.code, "INVALID_ROW_HANDLE");
+    assert!(rejection.commit_evidence.is_some());
+    assert_eq!(stored(&manager).await, before);
+
+    req.change_set_id = Uuid::new_v4().to_string();
+    req.operations.clear();
+    let malformed = commit_internal(&manager, req, None, true)
+        .await
+        .unwrap_err();
+    assert_eq!(malformed.code, "INVALID_CHANGESET");
+    assert!(malformed.commit_evidence.is_none());
+    assert_eq!(stored(&manager).await, before);
+}
+
+#[tokio::test]
+async fn another_manager_cannot_sign_not_executed_for_an_old_result_id() {
+    let (manager, page) = fixture().await;
+    let req = one_update(&page, "1", "原管理器已提交");
+    assert_eq!(
+        commit_internal(&manager, req.clone(), None, true)
+            .await
+            .unwrap()
+            .status,
+        CommitStatus::Committed
+    );
+    let (other, _) = fixture().await;
+    let before = stored(&other).await;
+    let rejection = commit_internal(&other, req, None, true).await.unwrap_err();
+    assert_eq!(rejection.code, "RESULT_CONTEXT_NOT_FOUND");
+    assert!(rejection.commit_evidence.is_none());
+    assert_eq!(stored(&other).await, before);
+}
+
+#[tokio::test]
+async fn evicted_issuance_history_only_declines_proof_without_reexecuting() {
+    let (manager, page) = fixture().await;
+    let req = one_update(&page, "1", "不得写入");
+    let before = stored(&manager).await;
+    for _ in 0..4096 {
+        manager
+            .result_contexts
+            .register(
+                crate::result_context::ResultContextSeed {
+                    revision: 1,
+                    connection_id: CONNECTION.into(),
+                    connection_generation: page.context.connection_generation.clone(),
+                    source: page.context.source.clone(),
+                    columns: vec![],
+                    metadata_fingerprint: "发行历史淘汰夹具".into(),
+                    reason_codes: vec![],
+                },
+                vec![],
+                now(),
+            )
+            .unwrap();
+    }
+    assert!(!manager.result_contexts.was_issued(&req.result_id).unwrap());
+    let rejection = commit_internal(&manager, req, None, true)
+        .await
+        .unwrap_err();
+    assert_eq!(rejection.code, "RESULT_CONTEXT_NOT_FOUND");
+    assert!(rejection.commit_evidence.is_none());
+    assert_eq!(stored(&manager).await, before);
+    let latest = read(&manager).await;
+    assert_eq!(latest.typed_rows, page.typed_rows);
+    assert!(manager
+        .result_contexts
+        .get_context(&latest.context.result_id, latest.context.revision, now())
+        .is_ok());
+}
+
+#[tokio::test]
 async fn receipts_remain_queryable_after_context_release_and_old_handles_stay_invalid() {
     let (manager, page) = fixture().await;
     let req = one_update(&page, "1", "已保存");

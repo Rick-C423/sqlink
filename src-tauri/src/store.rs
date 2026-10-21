@@ -414,7 +414,11 @@ fn resolve_key_with_support(
         }
     }
     let configs = read_configs(&dir.join("connections.json"))?;
-    let fresh = configs.is_empty() && state.is_none() && legacy.is_none();
+    // 首次钥匙串故障期间也能保存无密码连接；连接条数不代表已经创建过密钥。
+    // 仅允许没有旧密钥、迁移指针且所有落盘密码为空的配置初始化，保留旧凭据恢复边界。
+    let can_initialize = state.is_none()
+        && legacy.is_none()
+        && configs.iter().all(|config| config.password.is_empty());
     let (key, location) = match backend.get() {
         Ok(Some(key)) => {
             if legacy.is_some_and(|old| old != key) {
@@ -435,7 +439,7 @@ fn resolve_key_with_support(
             }
             let key = match legacy {
                 Some(key) => key,
-                None if fresh => rand::random::<[u8; 32]>(),
+                None if can_initialize => rand::random::<[u8; 32]>(),
                 None => {
                     return Err(CredentialIssue::new(
                         "missing",
@@ -468,7 +472,7 @@ fn resolve_key_with_support(
             }
             let key = match legacy {
                 Some(key) => key,
-                None if fresh => {
+                None if can_initialize => {
                     let key: [u8; 32] = rand::random();
                     disk.write_atomic(&key_path, &key)?;
                     key
@@ -897,6 +901,138 @@ mod tests {
     }
 
     #[test]
+    fn first_outage_with_passwordless_connections_initializes_after_recovery() {
+        for save_password in [true, false] {
+            let dir = TestDir::new();
+            let backend = MockKeychain::fail_read("unavailable");
+            let store = test_store(&dir.0, &backend);
+            assert_eq!(store.credential_health().state, "unavailable");
+            let mut config = sample_config();
+            config.save_password = Some(save_password);
+            if save_password {
+                config.password.clear();
+            } else {
+                config.driver_type = "mysql".into();
+            }
+            store.save(&config).unwrap();
+            let before = std::fs::read(&store.path).unwrap();
+            assert!(read_configs(&store.path).unwrap()[0].password.is_empty());
+            assert_eq!(backend.0.lock().unwrap().writes, 0);
+            assert!(!dir.0.join(LEGACY_KEY_FILE).exists());
+            assert!(!dir.0.join(KEY_STATE_FILE).exists());
+            drop(store);
+
+            // 注入的首次故障已消费，空 mock 此时明确返回 NoEntry。
+            let recovered = test_store(&dir.0, &backend);
+            assert_eq!(recovered.credential_health().state, "ready");
+            assert_eq!(backend.0.lock().unwrap().writes, 1);
+            assert_eq!(std::fs::read(&recovered.path).unwrap(), before);
+            assert!(!dir.0.join(LEGACY_KEY_FILE).exists());
+            assert!(dir.0.join(KEY_STATE_FILE).exists());
+            let pointer = std::fs::read(dir.0.join(KEY_STATE_FILE)).unwrap();
+            recovered.save(&sample_config()).unwrap();
+            let encrypted = std::fs::read(&recovered.path).unwrap();
+            assert!(read_configs(&recovered.path).unwrap()[0]
+                .password
+                .starts_with(ENC_PREFIX));
+            assert!(!String::from_utf8_lossy(&encrypted).contains("p@ss"));
+            drop(recovered);
+
+            let restarted = test_store(&dir.0, &backend);
+            assert_eq!(restarted.credential_health().state, "ready");
+            assert_eq!(
+                restarted.get_decrypted("t1").unwrap().unwrap().password,
+                sample_config().password
+            );
+            assert_eq!(backend.0.lock().unwrap().writes, 1);
+            assert_eq!(std::fs::read(&restarted.path).unwrap(), encrypted);
+            assert_eq!(std::fs::read(dir.0.join(KEY_STATE_FILE)).unwrap(), pointer);
+        }
+    }
+
+    #[test]
+    fn passwordless_records_do_not_turn_keychain_read_errors_into_initialization() {
+        for code in [
+            "locked",
+            "unavailable",
+            "permission",
+            "corrupt",
+            "unsupported",
+            "io",
+            "conflict",
+        ] {
+            let dir = TestDir::new();
+            let mut config = sample_config();
+            config.password.clear();
+            let bytes = serde_json::to_vec(&vec![config]).unwrap();
+            std::fs::write(dir.0.join("connections.json"), &bytes).unwrap();
+            let backend = MockKeychain::fail_read(code);
+            let store = test_store(&dir.0, &backend);
+            assert_eq!(store.credential_health().state, code);
+            assert_eq!(store.list().unwrap().len(), 1);
+            assert!(store.save(&sample_config()).is_err());
+            assert_eq!(backend.0.lock().unwrap().writes, 0);
+            assert_eq!(std::fs::read(&store.path).unwrap(), bytes);
+            assert!(!dir.0.join(LEGACY_KEY_FILE).exists());
+            assert!(!dir.0.join(KEY_STATE_FILE).exists());
+        }
+    }
+
+    #[test]
+    fn ciphertext_of_any_format_prevents_initialization_without_old_key() {
+        for password in [
+            encrypt_with(&[20; 32], "旧密码"),
+            "enc:v1:损坏:密文".into(),
+            "enc:v2:未知:版本".into(),
+            "enc:".into(),
+        ] {
+            for save_password in [true, false] {
+                let dir = TestDir::new();
+                let mut config = sample_config();
+                config.password = password.clone();
+                config.save_password = Some(save_password);
+                let bytes = serde_json::to_vec(&vec![config]).unwrap();
+                std::fs::write(dir.0.join("connections.json"), &bytes).unwrap();
+                let backend = MockKeychain::default();
+                let store = test_store(&dir.0, &backend);
+                assert_eq!(store.credential_health().state, "missing");
+                assert_eq!(backend.0.lock().unwrap().writes, 0);
+                assert_eq!(std::fs::read(&store.path).unwrap(), bytes);
+                assert!(!dir.0.join(LEGACY_KEY_FILE).exists());
+                assert!(!dir.0.join(KEY_STATE_FILE).exists());
+            }
+        }
+    }
+
+    #[test]
+    fn persisted_pointer_prevents_initialization_with_passwordless_records() {
+        for location in ["keychain", "file"] {
+            for has_config in [true, false] {
+                let dir = TestDir::new();
+                let mut config = sample_config();
+                config.password.clear();
+                let configs = if has_config { vec![config] } else { vec![] };
+                let bytes = serde_json::to_vec(&configs).unwrap();
+                std::fs::write(dir.0.join("connections.json"), &bytes).unwrap();
+                let state = KeyState {
+                    version: 1,
+                    backend: location.into(),
+                    fingerprint: fingerprint(&[20; 32]),
+                };
+                let pointer = serde_json::to_vec(&state).unwrap();
+                std::fs::write(dir.0.join(KEY_STATE_FILE), &pointer).unwrap();
+                let backend = MockKeychain::default();
+                let store = test_store(&dir.0, &backend);
+                assert_eq!(store.credential_health().state, "missing");
+                assert_eq!(backend.0.lock().unwrap().writes, 0);
+                assert_eq!(std::fs::read(&store.path).unwrap(), bytes);
+                assert_eq!(std::fs::read(dir.0.join(KEY_STATE_FILE)).unwrap(), pointer);
+                assert!(!dir.0.join(LEGACY_KEY_FILE).exists());
+            }
+        }
+    }
+
+    #[test]
     fn every_read_failure_preserves_key_and_ciphertext_without_writes() {
         for code in [
             "locked",
@@ -1191,6 +1327,48 @@ mod tests {
         RealPersistence.write_atomic(&path, b"[]").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"[]");
         assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn passwordless_initialization_keeps_unsupported_platform_boundary() {
+        for (code, unsupported_platform, should_initialize) in [
+            ("unsupported", true, true),
+            ("unsupported", false, false),
+            ("unavailable", true, false),
+        ] {
+            let dir = TestDir::new();
+            let mut config = sample_config();
+            config.password.clear();
+            let bytes = serde_json::to_vec(&vec![config]).unwrap();
+            std::fs::write(dir.0.join("connections.json"), &bytes).unwrap();
+            let backend = MockKeychain::fail_read(code);
+            let result =
+                resolve_key_with_support(&dir.0, &backend, &RealPersistence, unsupported_platform);
+            assert_eq!(backend.0.lock().unwrap().writes, 0);
+            assert_eq!(
+                std::fs::read(dir.0.join("connections.json")).unwrap(),
+                bytes
+            );
+            if should_initialize {
+                let material = result.unwrap();
+                assert_eq!(material.backend, "file");
+                assert_eq!(
+                    std::fs::read(dir.0.join(LEGACY_KEY_FILE)).unwrap(),
+                    material.key
+                );
+                let restarted = MockKeychain::fail_read("unsupported");
+                assert_eq!(
+                    resolve_key_with_support(&dir.0, &restarted, &RealPersistence, true)
+                        .unwrap()
+                        .key,
+                    material.key
+                );
+            } else {
+                assert_eq!(result.err().unwrap().state, code);
+                assert!(!dir.0.join(LEGACY_KEY_FILE).exists());
+                assert!(!dir.0.join(KEY_STATE_FILE).exists());
+            }
+        }
     }
 
     #[test]

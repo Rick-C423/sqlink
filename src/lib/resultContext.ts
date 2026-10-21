@@ -2,6 +2,7 @@ import type { QueryResult } from "@/types/database";
 import type { ControlledTablePage, ControlledTableReadRequest, ResultContext } from "@/types/resultContext";
 import { isGridDraftDirty, type GridDraft } from "@/stores/gridDraftStore";
 import { isTypedValue } from "@/lib/typedValue";
+import { hasResultContextOwner } from "@/lib/resultContextOwners";
 
 export type ReleaseResultContext = (resultId: string, revision: number) => Promise<void>;
 
@@ -20,6 +21,7 @@ export function attachResultContext(page: ControlledTablePage, request: Controll
   const invalid = (reason: string): never => { throw new Error(`受控结果上下文无效：${reason}`); };
   if (!context || context.protocolVersion !== 1) invalid("不兼容的协议版本");
   if (!context.resultId || !Number.isSafeInteger(context.revision) || context.revision < 1 || !context.connectionGeneration) invalid("缺少结果身份");
+  if (context.recoveryIdentity !== undefined && (typeof context.recoveryIdentity !== "string" || !/^[0-9a-f]{64}$/.test(context.recoveryIdentity))) invalid("恢复对象摘要无效");
   if (context.connectionId !== request.connectionId) invalid("连接与请求不一致");
   if (result.error) invalid("查询结果包含错误");
   if (!Array.isArray(context.columns) || context.columns.length !== result.columns.length ||
@@ -55,6 +57,8 @@ export function attachResultContext(page: ControlledTablePage, request: Controll
 /** 脏草稿和正在提交的草稿固定保留最初结果的后端身份。 */
 export function isResultContextPinned(context: ResultContext, drafts: Iterable<GridDraft>): boolean {
   for (const draft of drafts) {
+    const preview = draft.recoveryPreview?.result.resultContext;
+    if (preview?.resultId === context.resultId && preview.revision === context.revision) return true;
     const source = draft.sourceResult?.resultContext;
     if (source?.resultId === context.resultId && source.revision === context.revision &&
       (draft.submitting || draft.saveState === "unknown" || draft.saveState === "committedRefreshFailed" || isGridDraftDirty(draft))) return true;
@@ -64,7 +68,7 @@ export function isResultContextPinned(context: ResultContext, drafts: Iterable<G
 
 /** 释放失败交由后端 TTL 兜底，不能使旧请求干扰当前页面。 */
 export async function retireResultContext(context: ResultContext | undefined, drafts: Iterable<GridDraft>, release: ReleaseResultContext): Promise<boolean> {
-  if (!context?.resultId || !Number.isInteger(context.revision) || isResultContextPinned(context, drafts)) return false;
+  if (!context?.resultId || !Number.isInteger(context.revision) || hasResultContextOwner(context) || isResultContextPinned(context, drafts)) return false;
   try {
     await release(context.resultId, context.revision);
     return true;

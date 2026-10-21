@@ -1,5 +1,6 @@
 import type { QueryResult } from "@/types/database";
 import type { ResultContext } from "@/types/resultContext";
+import { dropResultContextOwner, retainResultContextOwner } from "@/lib/resultContextOwners";
 
 export interface DatasetTicket { source: string; sequence: number; taskId: string; page: number; cursor?: string }
 export interface DatasetCountTicket { source: string; sequence: number; taskId: string; resultId?: string; revision?: number; connectionGeneration?: string }
@@ -33,7 +34,10 @@ export class DatasetController {
     this.cancel("page"); this.cancel("count");
     this.sequence++; this.countSequence++;
     this.active = undefined; this.counting = undefined;
-    if (this.cached) this.callbacks.retire(this.cached);
+    if (this.cached) {
+      dropResultContextOwner(this.cached.resultContext, this);
+      this.callbacks.retire(this.cached);
+    }
     this.cached = undefined; this.retainedBytes = 0; this.cursors.clear(); this.page = 0;
     this.source = source;
   }
@@ -60,7 +64,13 @@ export class DatasetController {
       this.callbacks.retire(result);
       throw new Error("DATASET_PAGE_BUDGET_EXCEEDED: 当前页超过前端缓存预算，请减少每页行数。");
     }
-    if (this.cached && this.cached !== result) this.callbacks.retire(this.cached);
+    if (this.cached && this.cached !== result) {
+      dropResultContextOwner(this.cached.resultContext, this);
+    }
+    retainResultContextOwner(result.resultContext, this);
+    if (this.cached && this.cached !== result) {
+      this.callbacks.retire(this.cached);
+    }
     this.cached = result; this.retainedBytes = bytes; this.page = ticket.page;
     // 只保存服务端给出的不透明令牌，翻回旧页/任意跳页沿用 offset。
     if (nextCursor) this.cursors.set(ticket.page + 1, nextCursor);

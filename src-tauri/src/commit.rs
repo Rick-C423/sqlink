@@ -69,6 +69,29 @@ fn reject(mut guard: ReceiptGuard, code: &str) -> CommitReceipt {
     guard.finish()
 }
 
+fn reject_before_reservation(
+    manager: &ConnectionPoolManager,
+    request: &ChangeSetRequest,
+    digest: &str,
+    rejection: ContextError,
+) -> Result<CommitReceipt, ContextError> {
+    // 新管理器或发行历史已淘汰的引用，不能证明其逻辑提交从未在旧实例执行。
+    if !manager
+        .result_contexts
+        .was_issued(&request.result_id)
+        .unwrap_or(false)
+    {
+        return Err(rejection);
+    }
+    manager.commit_receipts.reject_unreserved(
+        &request.change_set_id,
+        digest,
+        &request.result_id,
+        request.revision,
+        rejection,
+    )
+}
+
 /// 模块测试可绕过发布门禁验证协调器；该参数不在 IPC、配置或环境变量中暴露。
 async fn commit_internal(
     manager: &ConnectionPoolManager,
@@ -87,10 +110,18 @@ async fn commit_internal(
         return Ok(receipt);
     }
     let context =
-        manager
+        match manager
             .result_contexts
-            .get_context(&request.result_id, request.revision, now())?;
-    manager.validate_result_handles(&context, &handles).await?;
+            .get_context(&request.result_id, request.revision, now())
+        {
+            Ok(context) => context,
+            Err(rejection) => {
+                return reject_before_reservation(manager, &request, &digest, rejection)
+            }
+        };
+    if let Err(rejection) = manager.validate_result_handles(&context, &handles).await {
+        return reject_before_reservation(manager, &request, &digest, rejection);
+    }
     let guard = manager
         .commit_receipts
         .reserve(digest, base_receipt(&request, &context))?;

@@ -50,6 +50,51 @@ function edit(index: number, text: string) {
   act(() => input.props.onChange({ target: { value: text } }));
 }
 
+test("过期草稿明确未执行后可重新读取核对，确认恢复不写入，再保存使用新上下文句柄", async () => {
+  const original = source(); original.resultContext!.expiresAt = 1;
+  original.resultContext!.recoveryIdentity = "a".repeat(64);
+  original.typedRows![0][2] = { kind: "text", value: "只读值" };
+  original.resultContext!.columns[2].writable = false; original.resultContext!.columns[3].writable = false;
+  delete original.resultContext!.editPolicy.columnInputKinds![id(5)];
+  const fresh = structuredClone(original); fresh.resultContext!.resultId = id(90); fresh.rowHandles = [id(91)];
+  fresh.resultContext!.expiresAt = Date.now() + 60000;
+  const kinds = fresh.resultContext!.editPolicy.columnInputKinds!;
+  const mappedKinds: typeof kinds = {};
+  fresh.resultContext!.columns.forEach((column, index) => {
+    if (kinds[column.columnId]) mappedKinds[id(200 + index)] = kinds[column.columnId];
+    column.columnId = id(200 + index);
+  });
+  fresh.resultContext!.editPolicy.columnInputKinds = mappedKinds;
+  const sent: ChangeSetRequest[] = []; let reads = 0;
+  tauriService.commitChangeSet = async (request) => {
+    sent.push(request);
+    if (sent.length === 1) throw { code: "RESULT_CONTEXT_EXPIRED", message: "过期", commitEvidence: {
+      protocolVersion: 1, changeSetId: request.changeSetId, resultId: request.resultId, revision: request.revision, commitState: "notStarted",
+    } };
+    return receipt(request);
+  };
+  const props = (result: QueryResult) => <DataGrid draftKey="recover" result={result} onRefreshCommitted={async (context) => {
+    reads++; assert.equal(context.connectionId, "A");
+    view!.update(props(fresh));
+    return fresh;
+  }} />;
+  act(() => { view = create(props(original)); });
+  edit(1, "待恢复草稿");
+  await act(async () => { assert.equal(await state().saveDraft("recover"), false); });
+  assert.equal(state().drafts.recover.saveState, "failedBeforeCommit"); assert.equal(sent.length, 1);
+  await click("重新读取并核对草稿");
+  assert.ok(state().drafts.recover.recoveryPreview); assert.equal(reads, 1); assert.equal(sent.length, 1);
+  assert.equal(state().drafts.recover.sourceResult, original);
+  await click("确认恢复草稿");
+  assert.equal(sent.length, 1); assert.equal(state().drafts.recover.sourceResult, fresh);
+  assert.equal(state().drafts.recover.pendingRequest, undefined); assert.equal(isGridDraftDirty(state().drafts.recover), true);
+  await act(async () => { assert.equal(await state().saveDraft("recover"), true); });
+  assert.equal(sent.length, 2); assert.notEqual(sent[1].changeSetId, sent[0].changeSetId); assert.equal(sent[1].resultId, id(90));
+  const operation = sent[1].operations[0]; if (operation.kind === "update") {
+    assert.equal(operation.rowHandle, id(91)); assert.deepEqual(operation.changes[id(201)], { mode: "set", value: { kind: "text", value: "待恢复草稿" } });
+  } else assert.fail("恢复后仍应为参数化更新");
+});
+
 test("受控DataGrid只开放已发布类型，编辑器用无损整数原值，尚未失焦也走类型化提交", async () => {
   const original = source(); let sent: ChangeSetRequest | undefined; let refreshes = 0;
   tauriService.commitChangeSet = async (request) => { sent = request; return receipt(request); };

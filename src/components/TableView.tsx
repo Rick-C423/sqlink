@@ -205,6 +205,7 @@ export function TableData({ connectionId, database, schema, table, readonly }: T
   // 同 ID 的断开与重连也必须使旧结果失效；脏草稿由 store 继续固定保留。
   useEffect(() => {
     loadSequence.current++;
+    dataset.reset("");
     retire(currentResult.current);
     currentResult.current = undefined;
     setResult(undefined);
@@ -214,7 +215,7 @@ export function TableData({ connectionId, database, schema, table, readonly }: T
     setColNames([]);
     setLoading(false);
     setError(null);
-  }, [connectionId, connectionEpoch, retire]);
+  }, [connectionId, connectionEpoch, retire, dataset]);
 
   const driverType =
     useConnectionStore.getState().saved.find((c) => c.id === connectionId)?.driverType ??
@@ -280,7 +281,7 @@ export function TableData({ connectionId, database, schema, table, readonly }: T
         setColNames(response.table.columns.map((column) => column.name));
         // 网格权限仅由受控结果的后端策略决定。
         setEditContext(null);
-        return;
+        return nextResult;
       }
       // 筛选沿用只读查询；在 P102 类型化绑定前不登记可信上下文。
       const metadata = await tauriService.resolveTable(
@@ -319,6 +320,7 @@ export function TableData({ connectionId, database, schema, table, readonly }: T
       } else {
         setEditContext(null);
       }
+      return queryResult;
     } catch (err) {
       if (isCurrent()) setError(formatResultContextError(err));
       if (afterCommit) throw err;
@@ -413,8 +415,10 @@ export function TableData({ connectionId, database, schema, table, readonly }: T
 
   const refreshCommitted = useCallback(async (source: ResultContext) => {
     if (source.connectionId !== connectionId) throw new Error("刷新来源与原连接不一致。");
-    await load({ connectionId, database: source.source.database, schema: source.source.schema,
+    const refreshed = await load({ connectionId, database: source.source.database, schema: source.source.schema,
       table: source.source.table, primaryKeys: [], driverType }, true);
+    if (!refreshed) throw new Error("未获得新的受控读取结果，请重试读取。");
+    return refreshed;
   }, [connectionId, driverType, load]);
 
   const totalPages =

@@ -2,11 +2,13 @@ import { create } from "zustand";
 import type { EditContext, QueryResult } from "@/types/database";
 import { tauriService } from "@/services/tauriService";
 import type { ChangeSetRequest } from "@/types/typedValue";
-import type { CommitReceipt } from "@/types/commitReceipt";
+import type { CommitReceipt, RejectedBeforeExecution } from "@/types/commitReceipt";
 import type { ResultContext } from "@/types/resultContext";
-import { validateCommitReceipt } from "@/lib/commitReceipt";
+import { rejectedBeforeExecution, validateCommitReceipt } from "@/lib/commitReceipt";
+import { prepareGridDraftRecovery, type GridDraftRecoveryPreview } from "@/lib/gridDraftRecovery";
 import { cloneCellInput } from "@/lib/typedValue";
 import { typedValueInputText, type GridCellIntent } from "@/lib/gridCellInput";
+import { hasResultContextOwner } from "@/lib/resultContextOwners";
 
 export const queryDraftKey = (editorTabId: string): string => JSON.stringify(["query", editorTabId]);
 export const tableDraftKey = (connectionId: string, database: string, table: string, schema?: string): string =>
@@ -34,7 +36,9 @@ export interface GridDraft {
   commitReceipt?: CommitReceipt;
   pendingRequest?: ChangeSetRequest;
   pendingContext?: Pick<ResultContext, "connectionId" | "connectionGeneration">;
-  refreshAfterCommit?: () => Promise<void>;
+  refreshAfterCommit?: () => Promise<QueryResult | void>;
+  preflightRejection?: RejectedBeforeExecution;
+  recoveryPreview?: GridDraftRecoveryPreview;
   submissionToken?: number;
 }
 
@@ -84,8 +88,11 @@ interface GridDraftState {
   ensureDraft: (key: string, result?: QueryResult, context?: EditContext | null, save?: GridDraft["save"], typedSave?: GridDraft["typedSave"], refresh?: GridDraft["refreshAfterCommit"]) => void;
   updateDraft: (key: string, update: (draft: GridDraft) => Partial<GridDraft>) => void;
   saveDraft: (key: string) => Promise<boolean>;
-  saveChangeSetDraft: (key: string, request: ChangeSetRequest, refresh: () => Promise<void>, taskId?: string) => Promise<boolean>;
+  saveChangeSetDraft: (key: string, request: ChangeSetRequest, refresh: () => Promise<QueryResult | void>, taskId?: string) => Promise<boolean>;
   checkChangeSetReceipt: (key: string) => Promise<boolean>;
+  reloadRejectedDraft: (key: string) => Promise<boolean>;
+  confirmRecoveredDraft: (key: string) => boolean;
+  cancelDraftRecovery: (key: string) => void;
   refreshCommittedDraft: (key: string) => Promise<boolean>;
   discardDraft: (key: string) => void;
   chooseNavigation: (choice: GridNavigationChoice) => Promise<void>;
@@ -109,6 +116,15 @@ function patchSubmission(key: string, token: number, patch: Partial<GridDraft>):
   if (!draft) return false;
   useGridDraftStore.setState((state) => ({ drafts: { ...state.drafts, [key]: { ...draft, ...patch } } }));
   return true;
+}
+
+function receiveRejection(key: string, token: number, error: unknown): boolean {
+  const draft = matchingSubmission(key, token);
+  if (!draft?.pendingRequest) return false;
+  const rejection = rejectedBeforeExecution(error, draft.pendingRequest);
+  if (!rejection) return false;
+  return patchSubmission(key, token, { submitting: false, saveState: "failedBeforeCommit", preflightRejection: rejection,
+    recoveryPreview: undefined, error: `后端已确认本次变更未执行，草稿已保留。${rejection.message} 请重新读取并核对后恢复，或放弃草稿。` });
 }
 
 async function refreshSubmission(key: string, token: number): Promise<boolean> {
@@ -145,10 +161,10 @@ async function receiveReceipt(key: string, token: number, value: unknown): Promi
 /** 草稿不再引用旧结果时回收后端资源；关闭/过期后的重复释放由后端幂等处理。 */
 function releaseUnreferencedResult(result?: QueryResult): void {
   const context = result?.resultContext;
-  if (!context) return;
+  if (!context || hasResultContextOwner(context)) return;
   const referenced = Object.values(useGridDraftStore.getState().drafts).some((draft) => {
-    const other = draft.sourceResult?.resultContext;
-    return other?.resultId === context.resultId && other.revision === context.revision;
+    return [draft.sourceResult, draft.recoveryPreview?.result].some((result) =>
+      result?.resultContext?.resultId === context.resultId && result.resultContext.revision === context.revision);
   });
   if (!referenced) void tauriService.releaseResultContext(context.resultId, context.revision).catch(() => {});
 }
@@ -175,15 +191,17 @@ export const useGridDraftStore = create<GridDraftState>((set, get) => ({
     }
     set((state) => ({ drafts: { ...state.drafts, [key]: { ...emptyDraft(result, context, save), typedSave } } }));
     releaseUnreferencedResult(existing?.sourceResult);
+    releaseUnreferencedResult(existing?.recoveryPreview?.result);
   },
   updateDraft: (key, update) => {
     const draft = get().drafts[key];
-    if (!draft || draft.submitting || hasUnresolvedSave(draft) || get().navigation?.saving) return;
+    if (!draft || draft.submitting || draft.preflightRejection || hasUnresolvedSave(draft) || get().navigation?.saving) return;
     set((state) => ({ drafts: { ...state.drafts, [key]: { ...draft, ...update(draft) } } }));
   },
   saveDraft: async (key) => {
     const draft = get().drafts[key];
     if (draft?.submitting) return false;
+    if (draft?.preflightRejection) return false;
     if (draft?.saveState === "committedRefreshFailed") return get().refreshCommittedDraft(key);
     if (draft?.saveState === "unknown") return get().checkChangeSetReceipt(key);
     if (draft?.pendingRequest && !draft.typedSave && isGridDraftDirty(draft)) return false;
@@ -214,7 +232,7 @@ export const useGridDraftStore = create<GridDraftState>((set, get) => ({
   },
   saveChangeSetDraft: async (key, request, refresh, taskId) => {
     const draft = get().drafts[key];
-    if (!draft || draft.submitting || hasUnresolvedSave(draft) || draft.commitReceipt?.status === "committed") return false;
+    if (!draft || draft.submitting || draft.preflightRejection || hasUnresolvedSave(draft) || draft.commitReceipt?.status === "committed") return false;
     // 即使调用方保留旧请求，也不得重写已经提交过的同一变更集。
     if (draft.pendingRequest?.changeSetId === request.changeSetId) return false;
     const context = draft.sourceResult?.resultContext;
@@ -236,11 +254,12 @@ export const useGridDraftStore = create<GridDraftState>((set, get) => ({
     const token = ++nextSubmissionToken;
     set((state) => ({ drafts: { ...state.drafts, [key]: { ...materializeGridDraft(draft), pendingRequest: snapshot,
       pendingContext: { connectionId: context.connectionId, connectionGeneration: context.connectionGeneration },
-      refreshAfterCommit: refresh, submissionToken: token, commitReceipt: undefined, saveState: "submitting", submitting: true, error: null } } }));
+      refreshAfterCommit: refresh, submissionToken: token, commitReceipt: undefined, preflightRejection: undefined,
+      recoveryPreview: undefined, saveState: "submitting", submitting: true, error: null } } }));
     try {
       return await receiveReceipt(key, token, await tauriService.commitChangeSet(snapshot, taskId));
     } catch (error) {
-      patchSubmission(key, token, { submitting: false, saveState: "unknown", error: `提交结果未知，请核查回执，禁止重复提交。${String(error)}` });
+      if (!receiveRejection(key, token, error)) patchSubmission(key, token, { submitting: false, saveState: "unknown", error: `提交结果未知，请核查回执，禁止重复提交。${String(error)}` });
       return false;
     }
   },
@@ -252,9 +271,59 @@ export const useGridDraftStore = create<GridDraftState>((set, get) => ({
     try {
       return await receiveReceipt(key, token, await tauriService.getChangeSetReceipt(request.changeSetId, request.resultId, request.revision));
     } catch (error) {
-      patchSubmission(key, token, { submitting: false, saveState: "unknown", error: `回执核查失败，仍需核查，禁止重复提交。${String(error)}` });
+      if (!receiveRejection(key, token, error)) patchSubmission(key, token, { submitting: false, saveState: "unknown", error: `回执核查失败，仍需核查，禁止重复提交。${String(error)}` });
       return false;
     }
+  },
+  reloadRejectedDraft: async (key) => {
+    const draft = get().drafts[key];
+    if (!draft?.preflightRejection || draft.submitting || draft.saveState !== "failedBeforeCommit" ||
+      !draft.submissionToken || !draft.refreshAfterCommit) return false;
+    const token = draft.submissionToken;
+    patchSubmission(key, token, { submitting: true, recoveryPreview: undefined, error: null });
+    releaseUnreferencedResult(draft.recoveryPreview?.result);
+    let freshResult: QueryResult | void = undefined;
+    try {
+      const result = freshResult = await draft.refreshAfterCommit();
+      if (!result) throw new Error("未获得新的受控读取结果，原草稿仍保留。");
+      const current = matchingSubmission(key, token);
+      if (!current?.preflightRejection) {
+        releaseUnreferencedResult(result);
+        return false;
+      }
+      const recoveryPreview = prepareGridDraftRecovery(materializeGridDraft(current), result);
+      return patchSubmission(key, token, { submitting: false, recoveryPreview,
+        error: "已重新读取并核对完整原值；请确认恢复草稿。恢复只重建本地输入，不执行写入。" });
+    } catch (error) {
+      patchSubmission(key, token, { submitting: false, recoveryPreview: undefined,
+        error: `重新读取或核对失败，原草稿已保留。${String(error)}` });
+      releaseUnreferencedResult(freshResult || undefined);
+      return false;
+    }
+  },
+  confirmRecoveredDraft: (key) => {
+    const draft = get().drafts[key];
+    if (!draft?.preflightRejection || draft.submitting || !draft.recoveryPreview) return false;
+    try {
+      const preview = prepareGridDraftRecovery(materializeGridDraft(draft), draft.recoveryPreview.result);
+      set((state) => ({ drafts: { ...state.drafts, [key]: { ...emptyDraft(preview.result, null),
+        typedSave: draft.typedSave, edits: preview.edits, cellIntents: preview.cellIntents,
+        newRows: preview.newRows, deletedRows: preview.deletedRows } } }));
+      releaseUnreferencedResult(draft.sourceResult);
+      return true;
+    } catch (error) {
+      set((state) => ({ drafts: { ...state.drafts, [key]: { ...draft, recoveryPreview: undefined,
+        error: `不能恢复草稿，原输入已保留。${String(error)}` } } }));
+      releaseUnreferencedResult(draft.recoveryPreview?.result);
+      return false;
+    }
+  },
+  cancelDraftRecovery: (key) => {
+    const draft = get().drafts[key];
+    if (!draft?.preflightRejection || draft.submitting) return;
+    set((state) => ({ drafts: { ...state.drafts, [key]: { ...draft, recoveryPreview: undefined,
+      error: "已取消恢复；原草稿仍保留，可复制草稿人工核对或放弃。" } } }));
+    releaseUnreferencedResult(draft.recoveryPreview?.result);
   },
   refreshCommittedDraft: async (key) => {
     const draft = get().drafts[key];
@@ -265,6 +334,7 @@ export const useGridDraftStore = create<GridDraftState>((set, get) => ({
     const draft = get().drafts[key];
     if (!draft || draft.submitting || hasUnresolvedSave(draft)) return;
     set((state) => ({ drafts: { ...state.drafts, [key]: { ...emptyDraft(draft.sourceResult, draft.sourceContext, draft.save), typedSave: draft.typedSave } } }));
+    releaseUnreferencedResult(draft.recoveryPreview?.result);
   },
   chooseNavigation: async (choice) => {
     const request = get().navigation;
@@ -301,10 +371,12 @@ export function releaseGridDraft(key: string): void {
   const state = useGridDraftStore.getState();
   if (hasGridDraftChanges(key) || state.navigation?.keys.includes(key)) return;
   const previous = state.drafts[key]?.sourceResult;
+  const preview = state.drafts[key]?.recoveryPreview?.result;
   const drafts = { ...state.drafts };
   delete drafts[key];
   useGridDraftStore.setState({ drafts });
   releaseUnreferencedResult(previous);
+  releaseUnreferencedResult(preview);
 }
 
 /** 对话框与保存独占导航，避免并发操作绕过同一份草稿。 */

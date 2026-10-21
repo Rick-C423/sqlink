@@ -202,6 +202,7 @@ async fn rollback_failure(
     task: &mut TaskGuard,
     mut lease: Box<dyn SessionLease>,
     error: DatabaseError,
+    sql_sent: bool,
 ) -> String {
     let rollback = lease.rollback().await;
     let cleanup = lease.release().await;
@@ -215,10 +216,11 @@ async fn rollback_failure(
         } else {
             TaskPhase::Failed
         },
-        if known {
-            CommitState::RolledBack
-        } else {
+        // 任意脚本可能已显式或隐式提交；当前事务清理成功不证明整批已回滚。
+        if sql_sent {
             CommitState::Unknown
+        } else {
+            CommitState::NotStarted
         },
         if rollback.is_ok() {
             CleanupState::Succeeded
@@ -230,7 +232,9 @@ async fn rollback_failure(
         } else {
             CleanupState::Failed
         },
-        Some(if known && cancelled {
+        Some(if sql_sent {
+            "BATCH_RESULT_UNKNOWN"
+        } else if known && cancelled {
             "QUERY_CANCELLED"
         } else if known {
             "BATCH_FAILED"
@@ -238,10 +242,12 @@ async fn rollback_failure(
             "ROLLBACK_UNKNOWN"
         }),
     );
-    if known {
+    if sql_sent {
+        format!("BATCH_RESULT_UNKNOWN: {error}。批处理可能已部分生效，请人工核对数据库，禁止盲目重发。回滚与清理仅针对当前会话，不保证撤销此前已提交的语句。")
+    } else if known {
         error.to_string()
     } else {
-        "ROLLBACK_UNKNOWN: 执行失败且无法确认回滚或清理结果，请核查数据库，不要自动重发".into()
+        format!("ROLLBACK_UNKNOWN: {error}。未发送用户 SQL，但无法确认回滚或清理结果，请人工核对数据库，禁止盲目重发")
     }
 }
 
@@ -291,13 +297,21 @@ pub async fn execute_batch_checked(
         return Err(error.to_string());
     }
     if let Err(error) = lease.begin().await {
-        return Err(rollback_failure(&mut task, lease, error).await);
+        return Err(rollback_failure(&mut task, lease, error, false).await);
     }
     let mut affected = 0u64;
+    let mut sql_sent = false;
     for sql in statements {
-        if task.cancel_requested() {
-            return Err(rollback_failure(&mut task, lease, DatabaseError::QueryCancelled).await);
+        // 原子核对取消并先登记可能发送的边界，覆盖发送中的错误及 owner abort。
+        if let Err(error) = task.script_sql_sent() {
+            let error = if task.cancel_requested() {
+                DatabaseError::QueryCancelled
+            } else {
+                DatabaseError::Unknown(error.to_string())
+            };
+            return Err(rollback_failure(&mut task, lease, error, sql_sent).await);
         }
+        sql_sent = true;
         let result = if returns_rows(&sql) {
             lease.query(&sql).await
         } else {
@@ -305,13 +319,26 @@ pub async fn execute_batch_checked(
         };
         match result {
             Ok(result) => affected = affected.saturating_add(result.rows_affected.unwrap_or(0)),
-            Err(error) => return Err(rollback_failure(&mut task, lease, error).await),
+            Err(error) => return Err(rollback_failure(&mut task, lease, error, sql_sent).await),
         }
     }
     if task.committing().is_err() {
-        return Err(rollback_failure(&mut task, lease, DatabaseError::QueryCancelled).await);
+        return Err(
+            rollback_failure(&mut task, lease, DatabaseError::QueryCancelled, sql_sent).await,
+        );
     }
-    if lease.commit().await.is_err() {
+    commit_batch(&mut task, lease, manager, &connection_id, &generation).await?;
+    Ok(affected)
+}
+
+async fn commit_batch(
+    task: &mut TaskGuard,
+    mut lease: Box<dyn SessionLease>,
+    manager: &ConnectionPoolManager,
+    connection_id: &str,
+    generation: &str,
+) -> Result<(), String> {
+    if let Err(error) = lease.commit().await {
         let cleanup = lease.release().await;
         let _ = task.finish(
             TaskPhase::Unknown,
@@ -324,12 +351,12 @@ pub async fn execute_batch_checked(
             },
             Some("COMMIT_UNKNOWN"),
         );
-        return Err("COMMIT_UNKNOWN: 提交结果无法确认，请核查数据库，不要自动重发".into());
+        return Err(format!("COMMIT_UNKNOWN: {error}。提交结果无法确认，批处理可能已部分生效，请人工核对数据库，禁止盲目重发"));
     }
     task.committed().map_err(|e| e.to_string())?;
     // COMMIT 已确认，随后清理/连接变化不能把已提交内容改报为未保存。
     let cleanup = lease.release().await;
-    let same = current_generation(manager, &connection_id, &generation).await;
+    let same = current_generation(manager, connection_id, generation).await;
     let _ = task.finish(
         TaskPhase::Succeeded,
         CommitState::Committed,
@@ -347,7 +374,7 @@ pub async fn execute_batch_checked(
             None
         },
     );
-    Ok(affected)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -389,7 +416,7 @@ mod tests {
             panic!("不应开始事务")
         }
         async fn commit(&mut self) -> Result<(), DatabaseError> {
-            panic!("不应提交")
+            Ok(())
         }
         async fn rollback(&mut self) -> Result<(), DatabaseError> {
             panic!("不应回滚未开始的事务")
@@ -414,6 +441,62 @@ mod tests {
         assert_eq!(status.phase, TaskPhase::Unknown);
         assert_eq!(status.commit_state, CommitState::NotStarted);
         assert_eq!(status.cleanup_state, CleanupState::Failed);
+        assert_eq!(registry.active_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn sqlite_cancel_after_begin_before_user_sql_keeps_not_started() {
+        let manager = ConnectionPoolManager::new(None);
+        let config = serde_json::from_value(serde_json::json!({
+            "id": "A", "name": "发送前取消回归", "driverType": "sqlite",
+            "host": "", "port": 0, "user": "", "password": "", "database": ":memory:"
+        }))
+        .unwrap();
+        manager.create_connection(config).await.unwrap();
+        let driver = manager.get_connection("A").await.unwrap();
+        let mut lease = driver.lease_session(None).await.unwrap();
+        let mut task = manager.tasks.start(None, "A", None, "batch").unwrap();
+        let id = task.task_id().to_owned();
+        task.prepare("gen", lease.capabilities()).unwrap();
+        task.attach(&*lease).unwrap();
+        task.running().unwrap();
+        lease.begin().await.unwrap();
+        manager.tasks.request_cancel(&id).await.unwrap();
+        assert!(task.script_sql_sent().is_err());
+        let error = rollback_failure(&mut task, lease, DatabaseError::QueryCancelled, false).await;
+        assert_eq!(error, "查询已取消");
+        let status = manager.tasks.snapshot(&id).unwrap();
+        assert_eq!(status.phase, TaskPhase::Cancelled);
+        assert_eq!(status.commit_state, CommitState::NotStarted);
+        assert_eq!(status.rollback_state, CleanupState::Succeeded);
+        assert_eq!(status.cleanup_state, CleanupState::Succeeded);
+        assert_eq!(manager.tasks.active_count(), 0);
+        driver.query("SELECT 1", None, None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn confirmed_commit_survives_cleanup_failure_and_connection_change() {
+        let registry = Arc::new(TaskRegistry::default());
+        let mut task = registry.start(None, "A", None, "batch").unwrap();
+        let id = task.task_id().to_owned();
+        task.prepare("gen", SessionCapabilities::without_cancellation("故障注入"))
+            .unwrap();
+        task.running().unwrap();
+        task.script_sql_sent().unwrap();
+        task.committing().unwrap();
+        let manager = ConnectionPoolManager::new(None);
+        commit_batch(&mut task, Box::new(FailedRelease), &manager, "A", "gen")
+            .await
+            .unwrap();
+        let status = registry.snapshot(&id).unwrap();
+        assert_eq!(status.phase, TaskPhase::Succeeded);
+        assert_eq!(status.commit_state, CommitState::Committed);
+        assert_eq!(status.rollback_state, CleanupState::NotStarted);
+        assert_eq!(status.cleanup_state, CleanupState::Failed);
+        assert_eq!(
+            status.error_code.as_deref(),
+            Some("COMMITTED_CLEANUP_FAILED")
+        );
         assert_eq!(registry.active_count(), 0);
     }
 }

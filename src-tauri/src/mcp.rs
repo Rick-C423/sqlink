@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     database::pool::ConnectionPoolManager,
     mcp_settings::{McpSettings, McpSettingsState},
-    models::QueryResult,
+    models::{integer_display_json, QueryResult},
 };
 
 /// 全部 MCP 工具名；设置界面的工具开关以此为准。
@@ -234,18 +234,7 @@ impl SqlinkMcp {
         let result = self
             .query(&req.connection_id, req.database.as_deref(), &req.sql)
             .await?;
-        if result.columns.len() != 1 || result.rows.len() != 1 {
-            return Err(format!(
-                "query_scalar 要求一行一列，实际为 {} 行 {} 列",
-                result.rows.len(),
-                result.columns.len()
-            ));
-        }
-        json_text(&json!({
-            "column": result.columns[0].name,
-            "value": result.rows[0].values[0],
-            "executionTimeMs": result.execution_time_ms,
-        }))
+        scalar_json_text(&result)
     }
 
     #[tool(description = "按 offset 和 limit 分段读取指定表的数据，单次最多 1000 行")]
@@ -518,6 +507,26 @@ fn load_or_create_token(config_path: &std::path::Path) -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
+fn scalar_json_text(result: &QueryResult) -> Result<String, String> {
+    if result.columns.len() != 1 || result.rows.len() != 1 {
+        return Err(format!(
+            "query_scalar 要求一行一列，实际为 {} 行 {} 列",
+            result.rows.len(),
+            result.columns.len()
+        ));
+    }
+    // 标量响应没有经过 RowData 序列化，需复用普通结果的整数传输规则。
+    let value = match &result.rows[0].values[0] {
+        Some(Value::Number(number)) => Some(integer_display_json(number)),
+        value => value.clone(),
+    };
+    json_text(&json!({
+        "column": result.columns[0].name,
+        "value": value,
+        "executionTimeMs": result.execution_time_ms,
+    }))
+}
+
 fn json_text<T: Serialize>(value: &T) -> Result<String, String> {
     let text = serde_json::to_string(value).map_err(|e| e.to_string())?;
     if text.len() > MAX_RESPONSE_BYTES {
@@ -661,8 +670,10 @@ fn strip_literals_and_comments(sql: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::{sqlite::SqliteDriver, DatabaseDriver};
     use crate::models::ConnectionConfig;
     use crate::store::ConnectionStore;
+    use rmcp::handler::server::tool::IntoCallToolResult;
 
     const INIT_BODY: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"sqlink-test","version":"1.0"}}}"#;
 
@@ -675,6 +686,157 @@ mod tests {
             HeaderValue::from_static("application/json, text/event-stream"),
         );
         headers
+    }
+
+    fn scalar_result(value: Option<Value>) -> QueryResult {
+        QueryResult {
+            columns: vec![crate::models::ColumnMetadata {
+                name: "scalar".into(),
+                data_type: String::new(),
+                unified_type: "Unknown".into(),
+                nullable: true,
+                length: None,
+                precision: None,
+                scale: None,
+            }],
+            rows: vec![crate::models::RowData {
+                values: vec![value],
+            }],
+            total_count: Some(1),
+            execution_time_ms: 7,
+            rows_affected: None,
+            last_insert_id: None,
+            truncated: false,
+        }
+    }
+
+    fn scalar_mcp_wire_value(result: &QueryResult) -> Value {
+        // 使用工具实际返回类型的转换，不访问凭据存储或启动 HTTP 服务。
+        let call = scalar_json_text(result).into_call_tool_result().unwrap();
+        assert_eq!(call.is_error, Some(false));
+        assert!(call.structured_content.is_none());
+        let outer: Value = serde_json::from_str(&serde_json::to_string(&call).unwrap()).unwrap();
+        assert!(outer.get("structuredContent").is_none());
+        assert_eq!(outer["content"].as_array().unwrap().len(), 1);
+        assert_eq!(outer["content"][0]["type"], "text");
+        let inner: Value =
+            serde_json::from_str(outer["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(inner["column"], result.columns[0].name);
+        assert_eq!(inner["executionTimeMs"], result.execution_time_ms);
+        inner["value"].clone()
+    }
+
+    #[tokio::test]
+    async fn mcp_scalar_sqlite_integers_match_plain_result_wire_values() {
+        let config: ConnectionConfig = serde_json::from_value(json!({
+            "id": "mcp-scalar-integers", "name": "MCP 标量整数回归", "driverType": "sqlite",
+            "host": "", "port": 0, "user": "", "password": "", "database": ":memory:"
+        }))
+        .unwrap();
+        let driver = SqliteDriver::connect(&config).await.unwrap();
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/plain-query-integers.json"
+        ))
+        .unwrap();
+        for row in fixture["rows"].as_array().unwrap() {
+            let integer = row["values"][1].as_str().unwrap().parse::<i64>().unwrap();
+            let result = driver
+                .query(&format!("SELECT {integer} AS scalar"), None, None)
+                .await
+                .unwrap();
+            assert!(result.columns[0].data_type.is_empty());
+            assert_eq!(
+                result.rows[0].values[0].as_ref().unwrap().as_i64(),
+                Some(integer)
+            );
+            assert_eq!(
+                serde_json::to_value(&result).unwrap()["rows"][0]["values"][0],
+                row["values"][0]
+            );
+            assert_eq!(scalar_mcp_wire_value(&result), row["values"][0]);
+            // 传输保护不能改变后端原值及后续类型判断。
+            assert_eq!(
+                result.rows[0].values[0].as_ref().unwrap().as_i64(),
+                Some(integer)
+            );
+        }
+        for (expression, expected) in [
+            ("9007199254740992.0", json!(9_007_199_254_740_992f64)),
+            ("1.25", json!(1.25)),
+            ("'0009007199254740993'", json!("0009007199254740993")),
+            ("NULL", Value::Null),
+        ] {
+            let result = driver
+                .query(&format!("SELECT {expression} AS scalar"), None, None)
+                .await
+                .unwrap();
+            assert_eq!(scalar_mcp_wire_value(&result), expected);
+        }
+        driver.disconnect().await.unwrap();
+    }
+
+    #[test]
+    fn mcp_scalar_unsigned_integers_keep_safe_numbers_and_exact_strings() {
+        for (integer, expected) in [
+            (0, json!(0)),
+            (9_007_199_254_740_991, json!(9_007_199_254_740_991u64)),
+            (9_007_199_254_740_992, json!("9007199254740992")),
+            (9_007_199_254_740_993, json!("9007199254740993")),
+            (u64::MAX, json!("18446744073709551615")),
+        ] {
+            let result = scalar_result(Some(json!(integer)));
+            assert_eq!(scalar_mcp_wire_value(&result), expected);
+            assert_eq!(
+                result.rows[0].values[0].as_ref().unwrap().as_u64(),
+                Some(integer)
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_scalar_preserves_non_integer_and_nested_json_semantics() {
+        for value in [
+            Some(json!("9007199254740993")),
+            Some(json!("0009007199254740993")),
+            Some(json!("18446744073709551615.00")),
+            Some(json!(9_007_199_254_740_992f64)),
+            Some(json!(1.25)),
+            Some(json!(true)),
+            Some(json!(false)),
+            Some(Value::Null),
+            None,
+            Some(json!({"nested": [9_007_199_254_740_993u64]})),
+            Some(json!([9_007_199_254_740_993u64])),
+        ] {
+            let result = scalar_result(value.clone());
+            let expected = value.clone().unwrap_or(Value::Null);
+            assert_eq!(scalar_mcp_wire_value(&result), expected);
+            assert_eq!(result.rows[0].values[0], value);
+        }
+    }
+
+    #[test]
+    fn mcp_scalar_still_requires_one_row_and_one_column() {
+        let result = scalar_result(Some(json!(1)));
+        let mut no_rows = result.clone();
+        no_rows.rows.clear();
+        let mut two_rows = result.clone();
+        two_rows.rows.push(result.rows[0].clone());
+        let mut no_columns = result.clone();
+        no_columns.columns.clear();
+        let mut two_columns = result.clone();
+        two_columns.columns.push(result.columns[0].clone());
+        for (invalid, rows, columns) in [
+            (no_rows, 0, 1),
+            (two_rows, 2, 1),
+            (no_columns, 1, 0),
+            (two_columns, 1, 2),
+        ] {
+            assert_eq!(
+                scalar_json_text(&invalid).unwrap_err(),
+                format!("query_scalar 要求一行一列，实际为 {rows} 行 {columns} 列")
+            );
+        }
     }
 
     #[test]

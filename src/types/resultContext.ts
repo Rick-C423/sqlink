@@ -20,6 +20,8 @@ export interface ResultContext {
   revision: number;
   connectionId: string;
   connectionGeneration: string;
+  /** 后端发布的对象与结构摘要，仅用于恢复核对，不能作为写入授权。 */
+  recoveryIdentity?: string;
   source: { database: string; schema?: string | null; table: string; kind: "table" | "view" | "unknown" };
   columns: {
     columnId: string;

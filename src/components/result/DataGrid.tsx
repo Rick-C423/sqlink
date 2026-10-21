@@ -7,6 +7,7 @@ import { compareGridValues } from "@/lib/gridSort";
 import { GridDraft, guardGridDraft, isGridDraftDirty, materializeGridDraft, useGridDraftStore } from "@/stores/gridDraftStore";
 import { buildGridDraftChangeSet, gridColumnInputKind, typedValueInputText, type GridCellIntent } from "@/lib/gridCellInput";
 import type { ResultContext } from "@/types/resultContext";
+import { gridDraftRecoveryText } from "@/lib/gridDraftRecovery";
 import { Button } from "@/components/ui";
 import { Plus, Check, RotateCcw, Loader2, Pencil, Trash2, Undo2, Copy } from "lucide-react";
 import { useT } from "@/i18n";
@@ -25,8 +26,8 @@ interface DataGridProps {
   readOnlyReason?: string;
   /** 兼容历史调用方；旧 SQL 保存回调不再执行。 */
   onApplyEdits?: (statements: string[]) => Promise<void>;
-  /** 已提交后按草稿固定的受控来源重新读取。 */
-  onRefreshCommitted?: (source: ResultContext) => Promise<void>;
+  /** 按草稿固定来源重新读取，用于提交后刷新及明确未执行草稿的核对。 */
+  onRefreshCommitted?: (source: ResultContext) => Promise<QueryResult | void>;
   /**
    * 受控排序：分页数据（表数据浏览）必须由父组件把 ORDER BY 拼进查询，
    * 内存排序只能作用于当前已拉取的页。传入 onSortChange 后本地排序禁用，
@@ -50,7 +51,7 @@ export function DataGrid({ result: incomingResult, editContext: incomingContext,
   const result = pinned ? draft?.sourceResult : incomingResult;
   const editContext = pinned ? draft?.sourceContext : incomingContext;
   const policy = getGridEditPolicy(result, editContext);
-  const readonly = readOnlyReason || policy.reason;
+  const readonly = draft?.preflightRejection ? "原草稿已明确未执行，请重新读取并核对后恢复，或放弃草稿。" : readOnlyReason || policy.reason;
   const updateDraft = useGridDraftStore((state) => state.updateDraft);
   const saveSnapshot = useCallback(async (snapshot: GridDraft) => {
     const safety = getGridEditPolicy(snapshot.sourceResult, snapshot.sourceContext);
@@ -62,7 +63,7 @@ export function DataGrid({ result: incomingResult, editContext: incomingContext,
   }, [key, onRefreshCommitted, readOnlyReason]);
   const refreshSnapshot = useCallback(async () => {
     if (!result?.resultContext || !onRefreshCommitted) throw new Error("当前草稿没有可用的受控刷新操作。");
-    await onRefreshCommitted(result.resultContext);
+    return await onRefreshCommitted(result.resultContext);
   }, [result?.resultContext, onRefreshCommitted]);
   useEffect(() => {
     useGridDraftStore.getState().ensureDraft(key, incomingResult, incomingContext, undefined, saveSnapshot, refreshSnapshot);
@@ -135,7 +136,7 @@ export function DataGrid({ result: incomingResult, editContext: incomingContext,
     setColWidths({});
   }, [columnSignature]);
 
-  const editable = !readOnlyReason && policy.editable && !!onRefreshCommitted && !submitting && !unresolved;
+  const editable = !readOnlyReason && !draft?.preflightRejection && policy.editable && !!onRefreshCommitted && !submitting && !unresolved;
   const permits = (operation: string) => editable && !!result?.resultContext?.editPolicy.allowedOperations.includes(operation);
   const columnEditable = (index: number) => !!gridColumnInputKind(result, index);
   const hasPrimaryKey = (editContext?.primaryKeys.length ?? 0) > 0;
@@ -459,6 +460,19 @@ export function DataGrid({ result: incomingResult, editContext: incomingContext,
             onClick={() => useGridDraftStore.getState().checkChangeSetReceipt(key)}>核查回执</Button>}
           {draft?.saveState === "committedRefreshFailed" && <Button size="sm" disabled={submitting}
             onClick={() => useGridDraftStore.getState().refreshCommittedDraft(key)}>重试读取</Button>}
+          {draft?.preflightRejection && !draft.recoveryPreview && <Button size="sm" disabled={submitting || !onRefreshCommitted}
+            onClick={() => useGridDraftStore.getState().reloadRejectedDraft(key)}>重新读取并核对草稿</Button>}
+          {draft?.recoveryPreview && <>
+            <span className="text-muted-foreground">原始行的完整无损值核对一致；尚未写入。</span>
+            <Button size="sm" disabled={submitting} onClick={() => useGridDraftStore.getState().confirmRecoveredDraft(key)}>确认恢复草稿</Button>
+            <Button size="sm" variant="outline" disabled={submitting} onClick={() => useGridDraftStore.getState().cancelDraftRecovery(key)}>取消恢复</Button>
+          </>}
+          {(draft?.preflightRejection || draft?.saveState === "unknown") && <Button size="sm" variant="outline" disabled={submitting}
+            onClick={async () => {
+              try { await navigator.clipboard.writeText(gridDraftRecoveryText(materializeGridDraft(draft))); }
+              catch { useGridDraftStore.setState((state) => state.drafts[key] !== draft ? state :
+                ({ drafts: { ...state.drafts, [key]: { ...draft, error: "复制草稿失败，原输入仍保留。" } } })); }
+            }}>复制草稿供核对</Button>}
           <Button
             variant="ghost"
             size="sm"

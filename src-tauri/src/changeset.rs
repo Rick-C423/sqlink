@@ -883,6 +883,7 @@ mod tests {
             revision: 1,
             connection_id: "c".into(),
             connection_generation: Uuid::new_v4().to_string(),
+            recovery_identity: None,
             columns: table
                 .columns
                 .iter()

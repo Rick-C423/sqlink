@@ -1,6 +1,6 @@
 //! 有界进程内提交回执。详情过期只回收载荷，不允许同一 ID 重新执行。
 
-use crate::result_context::{ContextError, ResultContextRegistry};
+use crate::result_context::{CommitExecutionEvidence, ContextError, ResultContextRegistry};
 use crate::task_registry::{CleanupState, CommitState};
 use crate::typed_value::TypedValue;
 use serde::Serialize;
@@ -74,6 +74,27 @@ struct Entry {
     receipt: Option<CommitReceipt>,
     bytes: usize,
     completed_at: i64,
+    not_executed: Option<KnownNotExecuted>,
+}
+
+/// 与运行记录明确区分；只可在确认没有预留和上下文占用的同一把锁内创建。
+struct KnownNotExecuted {
+    evidence: CommitExecutionEvidence,
+    rejection: Option<ContextError>,
+    retained_bytes: usize,
+}
+
+impl KnownNotExecuted {
+    fn error(&self) -> ContextError {
+        let mut rejection = self.rejection.clone().unwrap_or_else(|| {
+            err(
+                "COMMIT_NOT_EXECUTED",
+                "该变更已确认未执行，请重新读取后提交新的变更",
+            )
+        });
+        rejection.commit_evidence = Some(self.evidence.clone());
+        rejection
+    }
 }
 #[derive(Default)]
 struct State {
@@ -113,8 +134,17 @@ impl ReceiptRegistry {
         for entry in state.entries.values_mut() {
             if !entry.active && now.saturating_sub(entry.completed_at) >= self.ttl_ms {
                 entry.receipt = None;
-                state.bytes = state.bytes.saturating_sub(entry.bytes);
-                entry.bytes = 0;
+                let retained_bytes = match &mut entry.not_executed {
+                    Some(known) => {
+                        known.rejection = None;
+                        known.retained_bytes
+                    }
+                    None => 0,
+                };
+                state.bytes = state
+                    .bytes
+                    .saturating_sub(entry.bytes.saturating_sub(retained_bytes));
+                entry.bytes = retained_bytes;
             }
         }
     }
@@ -135,6 +165,9 @@ impl ReceiptRegistry {
         if entry.digest != digest {
             return Err(err("CHANGESET_ID_REUSED", "同一变更 ID 不能用于不同内容"));
         }
+        if let Some(known) = &entry.not_executed {
+            return Err(known.error());
+        }
         if let Some(receipt) = &entry.receipt {
             return Ok(Some(receipt.clone()));
         }
@@ -144,6 +177,92 @@ impl ReceiptRegistry {
             err("RECEIPT_EXPIRED", "回执详情已过期，禁止重发，请核查数据库")
         })
     }
+
+    /// 将上下文校验前的拒绝与并发预留原子仲裁；登记失败时保留普通错误。
+    pub(crate) fn reject_unreserved(
+        &self,
+        id: &str,
+        digest: &str,
+        result_id: &str,
+        revision: u64,
+        mut rejection: ContextError,
+    ) -> Result<CommitReceipt, ContextError> {
+        rejection.commit_evidence = None;
+        let change_set_id = id.to_owned();
+        let id = key(id)?;
+        let Ok(mut state) = self.state.lock() else {
+            return Err(rejection);
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        self.purge(&mut state, now);
+        if let Some(entry) = state.entries.get(&id) {
+            if entry.digest != digest {
+                return Err(err("CHANGESET_ID_REUSED", "同一变更 ID 不能用于不同内容"));
+            }
+            if let Some(known) = &entry.not_executed {
+                return Err(known.error());
+            }
+            if let Some(receipt) = &entry.receipt {
+                return Ok(receipt.clone());
+            }
+            return Err(if entry.active {
+                err("CHANGESET_IN_PROGRESS", "该变更正在执行，请查询原回执")
+            } else {
+                err("RECEIPT_EXPIRED", "回执详情已过期，禁止重发，请核查数据库")
+            });
+        }
+        if state
+            .context_claims
+            .contains_key(&(result_id.into(), revision))
+            || state.entries.len() >= self.max_ids
+        {
+            return Err(rejection);
+        }
+        let evidence = CommitExecutionEvidence {
+            protocol_version: 1,
+            change_set_id,
+            result_id: result_id.into(),
+            revision,
+            commit_state: "notStarted",
+        };
+        // 摘要、身份和证据永久占用预算；只有原错误详情可按 TTL 回收。
+        let retained_bytes = serde_json::to_vec(&(&id, digest, &evidence))
+            .ok()
+            .and_then(|bytes| bytes.len().checked_mul(4))
+            .and_then(|bytes| bytes.checked_add(512));
+        let bytes = serde_json::to_vec(&rejection)
+            .ok()
+            .and_then(|bytes| bytes.len().checked_mul(4))
+            .and_then(|bytes| bytes.checked_add(retained_bytes?));
+        let (Some(retained_bytes), Some(bytes)) = (retained_bytes, bytes) else {
+            return Err(rejection);
+        };
+        if bytes > self.max_bytes || state.bytes > self.max_bytes - bytes {
+            return Err(rejection);
+        }
+        let known = KnownNotExecuted {
+            evidence,
+            rejection: Some(rejection),
+            retained_bytes,
+        };
+        let rejection = known.error();
+        state.bytes += bytes;
+        state.entries.insert(
+            id,
+            Entry {
+                digest: digest.into(),
+                result_id: result_id.into(),
+                revision,
+                active: false,
+                receipt: None,
+                bytes,
+                completed_at: now,
+                not_executed: Some(known),
+            },
+        );
+        Err(rejection)
+    }
+
     pub(crate) fn reserve(
         self: &Arc<Self>,
         digest: String,
@@ -158,6 +277,9 @@ impl ReceiptRegistry {
         if let Some(entry) = state.entries.get(&id) {
             if entry.digest != digest {
                 return Err(err("CHANGESET_ID_REUSED", "同一变更 ID 不能用于不同内容"));
+            }
+            if let Some(known) = &entry.not_executed {
+                return Err(known.error());
             }
             return entry
                 .receipt
@@ -209,6 +331,7 @@ impl ReceiptRegistry {
                 receipt: None,
                 bytes: reservation_bytes,
                 completed_at: 0,
+                not_executed: None,
             },
         );
         Ok(ReceiptReservation::New(ReceiptGuard {
@@ -239,6 +362,9 @@ impl ReceiptRegistry {
             .ok_or_else(|| err("RECEIPT_NOT_FOUND", "没有本进程回执，不代表可以重新提交"))?;
         if entry.result_id != result_id || entry.revision != revision {
             return Err(err("RECEIPT_REFERENCE_MISMATCH", "回执不属于该结果版本"));
+        }
+        if let Some(known) = &entry.not_executed {
+            return Err(known.error());
         }
         entry.receipt.clone().ok_or_else(|| {
             if entry.active {
@@ -391,6 +517,218 @@ mod tests {
             _ => panic!("测试必须预留新引用"),
         }
     }
+    #[test]
+    fn unreserved_rejection_blocks_late_reservation_and_survives_detail_expiry() {
+        let registry = Arc::new(ReceiptRegistry {
+            max_ids: 1,
+            ..ReceiptRegistry::default()
+        });
+        let original = receipt();
+        let rejection = registry
+            .reject_unreserved(
+                &original.change_set_id,
+                "digest",
+                &original.result_id,
+                original.revision,
+                err("RESULT_CONTEXT_EXPIRED", "结果已过期"),
+            )
+            .unwrap_err();
+        let evidence = rejection.commit_evidence.as_ref().unwrap().clone();
+        assert_eq!(
+            serde_json::to_value(&evidence).unwrap(),
+            serde_json::json!({
+                "protocolVersion": 1,
+                "changeSetId": original.change_set_id,
+                "resultId": original.result_id,
+                "revision": original.revision,
+                "commitState": "notStarted"
+            })
+        );
+        assert_eq!(
+            registry
+                .existing(&original.change_set_id, "digest")
+                .unwrap_err(),
+            rejection
+        );
+        // 模拟另一请求已取到上下文、迟于拒绝登记到达预留阶段。
+        assert_eq!(
+            registry
+                .reserve("digest".into(), original.clone())
+                .err()
+                .unwrap(),
+            rejection
+        );
+        let reused = registry
+            .reserve("changed".into(), original.clone())
+            .err()
+            .unwrap();
+        assert_eq!(reused.code, "CHANGESET_ID_REUSED");
+        assert!(reused.commit_evidence.is_none());
+        let mismatch = registry
+            .get(&original.change_set_id, &original.result_id, 2)
+            .unwrap_err();
+        assert_eq!(mismatch.code, "RECEIPT_REFERENCE_MISMATCH");
+        assert!(mismatch.commit_evidence.is_none());
+        let before = registry.state.lock().unwrap().bytes;
+        registry
+            .state
+            .lock()
+            .unwrap()
+            .entries
+            .get_mut(&original.change_set_id)
+            .unwrap()
+            .completed_at = 0;
+        let expired = registry
+            .get(&original.change_set_id, &original.result_id, 1)
+            .unwrap_err();
+        assert_eq!(expired.code, "COMMIT_NOT_EXECUTED");
+        assert_eq!(expired.commit_evidence, Some(evidence));
+        assert_eq!(
+            registry
+                .reserve("digest".into(), original.clone())
+                .err()
+                .unwrap(),
+            expired
+        );
+        assert_eq!(
+            registry
+                .existing(&original.change_set_id, "digest")
+                .unwrap_err(),
+            expired
+        );
+        let state = registry.state.lock().unwrap();
+        assert_eq!(state.entries.len(), 1);
+        assert!(state.bytes > 0 && state.bytes < before);
+        drop(state);
+        let another = receipt();
+        let denied = registry
+            .reject_unreserved(
+                &another.change_set_id,
+                "another",
+                &another.result_id,
+                1,
+                err("RESULT_CONTEXT_NOT_FOUND", "上下文已回收"),
+            )
+            .unwrap_err();
+        assert!(denied.commit_evidence.is_none());
+        assert_eq!(
+            registry
+                .reserve("another".into(), another)
+                .err()
+                .unwrap()
+                .code,
+            "RECEIPT_BUDGET_EXCEEDED"
+        );
+    }
+
+    #[test]
+    fn execution_records_and_context_claims_cannot_be_overwritten_by_rejection_proof() {
+        for status in ["active", "unknown", "committed", "failed"] {
+            let registry = Arc::new(ReceiptRegistry::default());
+            let original = receipt();
+            let mut guard = reserve(&registry, original.clone());
+            if status == "committed" {
+                guard.committed();
+            }
+            if status != "active" {
+                if status == "unknown" {
+                    guard.writing();
+                    drop(guard);
+                } else {
+                    guard.finish();
+                }
+            }
+            let result = registry.reject_unreserved(
+                &original.change_set_id,
+                "digest",
+                &original.result_id,
+                1,
+                err("RESULT_CONTEXT_NOT_FOUND", "上下文已回收"),
+            );
+            if status == "active" {
+                let error = result.unwrap_err();
+                assert_eq!(error.code, "CHANGESET_IN_PROGRESS");
+                assert!(error.commit_evidence.is_none());
+            } else {
+                let receipt = result.unwrap();
+                assert_eq!(receipt.status == CommitStatus::Unknown, status == "unknown");
+                // 普通详情过期不能变成未执行证据，即使 commitState 是 notStarted。
+                registry
+                    .state
+                    .lock()
+                    .unwrap()
+                    .entries
+                    .get_mut(&original.change_set_id)
+                    .unwrap()
+                    .completed_at = 0;
+                let error = registry
+                    .reject_unreserved(
+                        &original.change_set_id,
+                        "digest",
+                        &original.result_id,
+                        1,
+                        err("RESULT_CONTEXT_NOT_FOUND", "上下文已回收"),
+                    )
+                    .unwrap_err();
+                assert_eq!(error.code, "RECEIPT_EXPIRED");
+                assert!(error.commit_evidence.is_none());
+            }
+            if status != "failed" {
+                let another_id = uuid::Uuid::new_v4().to_string();
+                let rejection = registry
+                    .reject_unreserved(
+                        &another_id,
+                        "other",
+                        &original.result_id,
+                        1,
+                        err("RESULT_CONTEXT_NOT_FOUND", "上下文已回收"),
+                    )
+                    .unwrap_err();
+                assert!(rejection.commit_evidence.is_none());
+                assert_eq!(registry.state.lock().unwrap().entries.len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn rejection_proof_requires_id_byte_and_lock_budgets() {
+        for (max_ids, max_bytes) in [(0, usize::MAX), (1, 0)] {
+            let registry = ReceiptRegistry {
+                max_ids,
+                max_bytes,
+                ..ReceiptRegistry::default()
+            };
+            let original = receipt();
+            let rejection = registry
+                .reject_unreserved(
+                    &original.change_set_id,
+                    "digest",
+                    &original.result_id,
+                    1,
+                    err("RESULT_CONTEXT_EXPIRED", "过期"),
+                )
+                .unwrap_err();
+            assert!(rejection.commit_evidence.is_none());
+            assert!(registry.state.lock().unwrap().entries.is_empty());
+        }
+        let registry = ReceiptRegistry::default();
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = registry.state.lock().unwrap();
+            panic!("注入回执锁故障");
+        });
+        let original = receipt();
+        let rejection = registry
+            .reject_unreserved(
+                &original.change_set_id,
+                "digest",
+                &original.result_id,
+                1,
+                err("RESULT_CONTEXT_EXPIRED", "过期"),
+            )
+            .unwrap_err();
+        assert!(rejection.commit_evidence.is_none());
+    }
+
     #[test]
     fn duplicate_requests_cannot_run_in_parallel_or_change_content() {
         let registry = Arc::new(ReceiptRegistry::default());

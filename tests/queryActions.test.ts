@@ -271,6 +271,27 @@ test("批量执行绑定开始时的来源，并使用新的取消 ID 与任务 
   assert.equal(tab().editContext, null);
 });
 
+for (const cause of ["no such table: missing_table", "查询已取消"]) {
+  test(`批执行保留原错误和部分生效警告，不自动重发：${cause}`, async () => {
+    const { service, calls, actions } = harness();
+    const reason = `BATCH_RESULT_UNKNOWN: ${cause}。批处理可能已部分生效，请人工核对数据库，禁止盲目重发。`;
+    service.executeBatch = async (...args) => {
+      calls.batches.push(args);
+      throw reason;
+    };
+    await assert.rejects(actions.executeAll("tab", ["INSERT INTO users VALUES(1)", "COMMIT"], A),
+      (error: unknown) => {
+        assert.equal(error, reason);
+        return true;
+      });
+    assert.equal(tab().result?.error, reason);
+    assert.equal(tab().resultSource?.connectionId, "A");
+    assert.equal(tab().isExecuting, false);
+    assert.equal(calls.batches.length, 1);
+    assert.deepEqual(calls.cancels, []);
+  });
+}
+
 test("不支持取消的驱动不会下发请求或声称任务已停止", async () => {
   const { service, calls, actions } = harness();
   const waiting = deferred<QueryResult>();
