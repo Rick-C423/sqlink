@@ -34,7 +34,55 @@ pub struct ColumnMetadata {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RowData {
+    #[serde(serialize_with = "serialize_query_values")]
     pub values: Vec<Option<serde_json::Value>>,
+}
+
+/// JavaScript 的整数安全范围；超出范围时，结果协议使用十进制字符串。
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
+pub(crate) fn integer_display_json(number: &serde_json::Number) -> serde_json::Value {
+    let unsafe_integer = number
+        .as_i64()
+        .is_some_and(|value| value.unsigned_abs() > MAX_SAFE_INTEGER)
+        || number
+            .as_u64()
+            .is_some_and(|value| value > MAX_SAFE_INTEGER);
+    if unsafe_integer {
+        serde_json::Value::String(number.to_string())
+    } else {
+        serde_json::Value::Number(number.clone())
+    }
+}
+
+/// 只在结果传输时保护标量整数，保留后端原值供 SQL 转储和数据库类型判断使用。
+fn serialize_query_values<S>(
+    values: &[Option<serde_json::Value>],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeSeq;
+    struct QueryValue<'a>(&'a Option<serde_json::Value>);
+    impl Serialize for QueryValue<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            match self.0 {
+                Some(serde_json::Value::Number(number)) => {
+                    Some(integer_display_json(number)).serialize(serializer)
+                }
+                value => value.serialize(serializer),
+            }
+        }
+    }
+    let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+    for value in values {
+        sequence.serialize_element(&QueryValue(value))?;
+    }
+    sequence.end()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +135,18 @@ pub struct ResolvedTable {
     pub schema: Option<String>,
     pub table: String,
     pub columns: Vec<ColumnInfo>,
+    /// 来自真实系统目录；未知来源不能建立可定位的行身份。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexKeyPart {
+    pub column: Option<String>,
+    /// 未能无损分解表达式时与 column 同为 None，完整定义由 definition 保存。
+    pub expression: Option<String>,
+    pub descending: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +156,10 @@ pub struct IndexInfo {
     pub columns: Vec<String>,
     pub is_unique: bool,
     pub is_primary: bool,
+    pub key_parts: Vec<IndexKeyPart>,
+    pub included_columns: Vec<String>,
+    pub definition: Option<String>,
+    pub predicate: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +169,7 @@ pub struct ForeignKeyInfo {
     pub columns: Vec<String>,
     pub ref_table: String,
     pub ref_schema: Option<String>,
+    pub ref_database: Option<String>,
     pub ref_columns: Vec<String>,
     pub on_update: Option<String>,
     pub on_delete: Option<String>,
@@ -134,6 +199,8 @@ pub struct ImportSummary {
     pub executed: u64,
     /// 因表已存在而跳过的 CREATE TABLE 条数（on_conflict = skip）
     pub skipped: u64,
+    /// 语句成功数不是提交回执，未闭合事务在租约归还时会回滚。
+    pub cleanup_notice: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -192,5 +259,72 @@ impl serde::Serialize for DatabaseError {
         S: serde::ser::Serializer,
     {
         serializer.serialize_str(self.to_string().as_ref())
+    }
+}
+
+#[cfg(test)]
+mod query_integer_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn signed_integer_wire_values_match_javascript_fixture_without_mutating_native_values() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/plain-query-integers.json"
+        ))
+        .unwrap();
+        for expected in fixture["rows"].as_array().unwrap() {
+            let text = expected["values"][1].as_str().unwrap();
+            let integer = text.parse::<i64>().unwrap();
+            let row = RowData {
+                values: vec![Some(json!(integer)), Some(json!(text))],
+            };
+            assert_eq!(serde_json::to_value(&row).unwrap(), *expected);
+            assert_eq!(row.values[0].as_ref().unwrap().as_i64(), Some(integer));
+            assert_eq!(
+                crate::typed_value::TypedValue::Integer(text.into()).display_json(),
+                expected["values"][0]
+            );
+        }
+    }
+
+    #[test]
+    fn unsigned_integer_wire_values_keep_safe_numbers_and_exact_uint64_strings() {
+        for (integer, expected) in [
+            (0, json!(0)),
+            (9_007_199_254_740_991, json!(9_007_199_254_740_991u64)),
+            (9_007_199_254_740_992, json!("9007199254740992")),
+            (9_007_199_254_740_993, json!("9007199254740993")),
+            (u64::MAX, json!("18446744073709551615")),
+        ] {
+            let row = RowData {
+                values: vec![Some(json!(integer))],
+            };
+            assert_eq!(serde_json::to_value(&row).unwrap()["values"][0], expected);
+            assert_eq!(row.values[0].as_ref().unwrap().as_u64(), Some(integer));
+            assert_eq!(
+                crate::typed_value::TypedValue::UnsignedInteger(integer.to_string()).display_json(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn integer_wire_protection_does_not_reinterpret_text_floats_booleans_or_null() {
+        let values = vec![
+            Some(json!("9007199254740993")),
+            Some(json!("0009007199254740993")),
+            Some(json!("18446744073709551615.00")),
+            Some(json!(9_007_199_254_740_992f64)),
+            Some(json!(1.25)),
+            Some(json!(true)),
+            Some(Value::Null),
+            None,
+        ];
+        let row = RowData {
+            values: values.clone(),
+        };
+        assert_eq!(serde_json::to_value(&row).unwrap()["values"], json!(values));
+        assert_eq!(row.values, values);
     }
 }

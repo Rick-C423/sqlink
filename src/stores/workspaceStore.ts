@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { useEditorStore } from "@/stores/editorStore";
 import { t } from "@/i18n";
+import { relationTabId } from "@/lib/objectIdentity";
+import { guardGridDrafts, hasGridDraftChanges, queryDraftKey, tableDraftKey, releaseGridDraft } from "@/stores/gridDraftStore";
 
 export type WorkspaceTabKind = "query" | "database" | "table" | "view" | "createTable" | "users" | "server" | "routine";
 
@@ -16,6 +18,7 @@ export interface WorkspaceTab {
   connectionId: string;
   database?: string;
   table?: string;
+  schema?: string;
   /** kind === "table" 时要打开的子页（数据/结构），由打开入口指定 */
   tableSubTab?: TableSubTab;
   /** 已打开的表 tab 被再次指定子页时递增，驱动 TableView 切换子页 */
@@ -33,9 +36,9 @@ interface WorkspaceState {
   /** 打开/聚焦数据库概览 tab */
   openDatabase: (connectionId: string, database: string) => void;
   /** 打开/聚焦表视图 tab；subTab 指定落到「数据」还是「结构」子页 */
-  openTable: (connectionId: string, database: string, table: string, subTab?: TableSubTab) => void;
+  openTable: (connectionId: string, database: string, table: string, subTab?: TableSubTab, schema?: string) => void;
   /** 打开/聚焦视图 tab（数据只读 + 定义） */
-  openView: (connectionId: string, database: string, view: string) => void;
+  openView: (connectionId: string, database: string, view: string, schema?: string) => void;
   /** 打开/聚焦触发器/存储过程/函数 tab（定义只读） */
   openRoutine: (connectionId: string, database: string, routineKind: RoutineKind, name: string) => void;
   /** 打开/聚焦新建表设计器 tab（每个库一个） */
@@ -47,7 +50,15 @@ interface WorkspaceState {
   /** 新建查询 tab（始终排在最后），可预填 SQL */
   openQuery: (connectionId: string, content?: string) => void;
   activate: (id: string) => void;
-  close: (id: string) => void;
+  close: (id: string) => Promise<boolean>;
+  closeMany: (ids: string[]) => Promise<boolean>;
+}
+
+function draftKeyForTab(tab: WorkspaceTab): string | undefined {
+  if (tab.editorTabId) return queryDraftKey(tab.editorTabId);
+  if ((tab.kind === "table" || tab.kind === "view") && tab.database && tab.table) {
+    return tableDraftKey(tab.connectionId, tab.database, tab.table, tab.schema);
+  }
 }
 
 /** 对象 tab 排在查询 tab 前面：返回新对象 tab 应插入的位置 */
@@ -62,7 +73,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   activeId: null,
 
   openDatabase: (connectionId, database) => {
-    const id = `db::${connectionId}::${database}`;
+    const id = JSON.stringify(["database", connectionId, database]);
     const existing = get().tabs.find((t) => t.id === id);
     if (existing) {
       set({ activeId: id });
@@ -83,8 +94,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
-  openTable: (connectionId, database, table, subTab) => {
-    const id = `table::${connectionId}::${database}::${table}`;
+  openTable: (connectionId, database, table, subTab, schema) => {
+    const id = relationTabId("table", connectionId, database, table, schema);
     const existing = get().tabs.find((t) => t.id === id);
     if (existing) {
       if (subTab) {
@@ -106,10 +117,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const tab: WorkspaceTab = {
         id,
         kind: "table",
-        title: table,
+        title: schema ? `${schema}.${table}` : table,
         connectionId,
         database,
         table,
+        schema,
         tableSubTab: subTab ?? "data",
       };
       const idx = insertIndexFor(state.tabs, "table");
@@ -119,8 +131,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
-  openView: (connectionId, database, view) => {
-    const id = `view::${connectionId}::${database}::${view}`;
+  openView: (connectionId, database, view, schema) => {
+    const id = relationTabId("view", connectionId, database, view, schema);
     const existing = get().tabs.find((t) => t.id === id);
     if (existing) {
       set({ activeId: id });
@@ -130,10 +142,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const tab: WorkspaceTab = {
         id,
         kind: "view",
-        title: view,
+        title: schema ? `${schema}.${view}` : view,
         connectionId,
         database,
         table: view,
+        schema,
       };
       const idx = insertIndexFor(state.tabs, "view");
       const tabs = [...state.tabs];
@@ -143,7 +156,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   openRoutine: (connectionId, database, routineKind, name) => {
-    const id = `routine::${routineKind}::${connectionId}::${database}::${name}`;
+    const id = JSON.stringify(["routine", routineKind, connectionId, database, name]);
     const existing = get().tabs.find((t) => t.id === id);
     if (existing) {
       set({ activeId: id });
@@ -167,7 +180,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   openCreateTable: (connectionId, database) => {
-    const id = `createTable::${connectionId}::${database}`;
+    const id = JSON.stringify(["createTable", connectionId, database]);
     const existing = get().tabs.find((t) => t.id === id);
     if (existing) {
       set({ activeId: id });
@@ -233,21 +246,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   activate: (id) => set({ activeId: id }),
 
-  close: (id) =>
+  close: async (id) => {
+    const closing = get().tabs.find((tab) => tab.id === id);
+    const key = closing && draftKeyForTab(closing);
+    if (key && hasGridDraftChanges(key) && !await guardGridDrafts([key])) return false;
+    if (closing?.editorTabId && !await useEditorStore.getState().closeTab(closing.editorTabId)) return false;
     set((state) => {
       const idx = state.tabs.findIndex((t) => t.id === id);
       const closing = state.tabs[idx];
       const tabs = state.tabs.filter((t) => t.id !== id);
-
-      // 查询 tab 关闭时同步关闭编辑器 tab
-      if (closing?.kind === "query" && closing.editorTabId) {
-        useEditorStore.getState().closeTab(closing.editorTabId);
-      }
 
       const activeId =
         state.activeId === id
           ? tabs[Math.min(idx, tabs.length - 1)]?.id ?? null
           : state.activeId;
       return { tabs, activeId };
-    }),
+    });
+    if (key) releaseGridDraft(key);
+    return true;
+  },
+
+  closeMany: async (ids) => {
+    const keys = get().tabs.filter((tab) => ids.includes(tab.id)).map(draftKeyForTab)
+      .filter((key): key is string => key !== undefined);
+    if (!await guardGridDrafts(keys)) return false;
+    for (const id of ids) {
+      if (!await get().close(id)) return false;
+    }
+    return true;
+  },
 }));

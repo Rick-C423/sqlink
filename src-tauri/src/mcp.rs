@@ -702,11 +702,33 @@ mod tests {
 
     #[test]
     fn whitelist_filters_denied_and_unsaved_connections() {
+        struct TestCredentialCleanup(Option<keyring::Entry>);
+        impl Drop for TestCredentialCleanup {
+            fn drop(&mut self) {
+                if let Some(entry) = &self.0 {
+                    if let Err(error) = entry.delete_credential() {
+                        if !matches!(error, keyring::Error::NoEntry) {
+                            eprintln!("MCP 随机测试凭据清理未确认，请核对本次输出的隔离条目");
+                        }
+                    }
+                }
+            }
+        }
         let dir = std::env::temp_dir().join(format!(
             "sqlink-mcp-whitelist-test-{}",
             uuid::Uuid::new_v4()
         ));
+        std::fs::create_dir_all(&dir).unwrap();
         let store = ConnectionStore::new(dir.clone()).unwrap();
+        let health = store.credential_health();
+        // 元数据测试不依赖系统钥匙串。只有实际创建钥匙串条目后才获取清理句柄。
+        let credentials = TestCredentialCleanup(
+            if health.state == "ready" && health.backend.as_deref() == Some("keychain") {
+                Some(crate::store::isolated_mcp_test_keychain_entry(&dir).unwrap())
+            } else {
+                None
+            },
+        );
         let config = |id: &str, allowed: Option<bool>| ConnectionConfig {
             id: Some(id.into()),
             name: id.into(),
@@ -741,7 +763,26 @@ mod tests {
             .contains("未允许"));
         assert!(mcp.connection_allowed("missing").is_err());
 
-        std::fs::remove_dir_all(&dir).ok();
+        if let Some(entry) = &credentials.0 {
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => {}
+                Err(_) => panic!("MCP 隔离测试凭据清理失败，请核对本次输出的随机条目"),
+            }
+            assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
+            eprintln!("MCP 隔离测试钥匙串条目已清理");
+        }
+        // 删除前校验仍位于本测试创建的随机临时目录；钥匙串句柄已在目录删除前固定。
+        let target = dir.canonicalize().unwrap();
+        assert_eq!(
+            target.parent(),
+            Some(std::env::temp_dir().canonicalize().unwrap().as_path())
+        );
+        assert!(target
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("sqlink-mcp-whitelist-test-"));
+        std::fs::remove_dir_all(&target).unwrap();
     }
 
     #[tokio::test]

@@ -1,0 +1,289 @@
+{
+  "GeneratedUtc": "2026-10-20T08:08:13.5241186Z",
+  "Scope": "P2 02 本轮流式原值导出、原子文件提交和有界单租约导入；现有编辑门禁及未提交改动保留。",
+  "GitHead": "53abb8f53be5a2513482d0118787eabba83d4280",
+  "Limits": {
+    "RawCellBytes": 1048576,
+    "RawRowBytes": 16777216,
+    "TypedRowRetainedBytes": 33554432,
+    "SqlStatementBytes": 8388608,
+    "ImportLineAndStatementBytes": 16777216,
+    "CatalogPlanBytes": 16777216,
+    "LegacyDumpStringBytes": 16777216,
+    "FileRowLimit": null,
+    "FileTotalByteLimit": null,
+    "ProcessRssHardLimit": false,
+    "WireRowPreallocationBounded": false
+  },
+  "Frontend": {
+    "Passed": 157,
+    "Failed": 0,
+    "NewExportJobComponentPassed": 10,
+    "ProductionBuild": "通过，仅既有 Monaco 大 chunk 提示",
+    "Log": ".zcode/p202-frontend.log",
+    "BuildLog": ".zcode/p202-build.log",
+    "DesktopExeAcceptanceThisRound": false
+  },
+  "Rust": {
+    "UnitPassed": 167,
+    "UnitIgnored": 11,
+    "SqliteAndLocalIntegrationPassed": 72,
+    "NewSqliteExportPassed": 10,
+    "NewImportAndIdentifiersPassed": 11,
+    "LegacyNetworkEarlyReturnExcluded": 3,
+    "RawHarnessPassed": 242,
+    "Failed": 0,
+    "Log": ".zcode/p202-rust-final.log",
+    "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --lib --tests",
+    "AtomicExitTest": "子进程 process::exit(73) 跳过析构，不代表断电实测",
+    "MsSqlExportIntegrationCompiled": true
+  },
+  "RealDatabases": {
+    "MySqlVersion": "5.7.44",
+    "MySqlPassed": 8,
+    "PostgresVersion": "17.11",
+    "PostgresPassed": 6,
+    "TotalPassed": 14,
+    "NewExportAndCrossDatabasePassed": 4,
+    "Cases": [
+      {
+        "Name": "mysql-export",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test export_mysql -- --ignored",
+        "ExitCode": 0,
+        "Passed": 2,
+        "Expected": 2,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-mysql-export.log",
+        "TestLines": [
+          "test mysql_export_errors_cancel_and_raw_limits_quarantine_lease ... ok",
+          "test mysql_export_preserves_native_values_and_more_than_ten_thousand_rows ... ok"
+        ]
+      },
+      {
+        "Name": "mysql-restore",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test export_mysql_restore -- --ignored",
+        "ExitCode": 0,
+        "Passed": 1,
+        "Expected": 1,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-mysql-restore.log",
+        "TestLines": [
+          "test mysql_dump_restores_into_selected_database_without_touching_source ... ok"
+        ]
+      },
+      {
+        "Name": "postgres-export",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test export_network postgres_stream_csv_and_dump_preserve_values_above_query_limit -- --ignored --exact",
+        "ExitCode": 0,
+        "Passed": 1,
+        "Expected": 1,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-postgres-export.log",
+        "TestLines": [
+          "test postgres_stream_csv_and_dump_preserve_values_above_query_limit ... ok"
+        ]
+      },
+      {
+        "Name": "query-budget",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test query_budget_mysql --test query_budget_postgres -- --ignored",
+        "ExitCode": 0,
+        "Passed": 4,
+        "Expected": 4,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-query-budget.log",
+        "TestLines": [
+          "test mysql_stream_limit_closes_unread_lease_without_draining_slow_tail ... ok",
+          "test mysql_byte_and_cell_limits_preserve_whole_aligned_rows ... ok",
+          "test postgres_row_limit_stops_before_slow_tail_and_quarantines_lease ... ok",
+          "test postgres_byte_budget_and_oversized_cells_keep_typed_rows_aligned ... ok"
+        ]
+      },
+      {
+        "Name": "session",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test session_pg_mysql -- --ignored",
+        "ExitCode": 0,
+        "Passed": 2,
+        "Expected": 2,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-session.log",
+        "TestLines": [
+          "test postgres_session_isolation_cancellation ... ok",
+          "test mysql_session_isolation_cancellation ... ok"
+        ]
+      },
+      {
+        "Name": "mysql-typed",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test typed_binding_mysql_network -- --ignored",
+        "ExitCode": 0,
+        "Passed": 1,
+        "Expected": 1,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-mysql-typed.log",
+        "TestLines": [
+          "test mysql_native_binding_round_trip ... ok"
+        ]
+      },
+      {
+        "Name": "postgres-typed",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test typed_binding_network postgres_native_typed_binding_roundtrip -- --ignored --exact",
+        "ExitCode": 0,
+        "Passed": 1,
+        "Expected": 1,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-postgres-typed.log",
+        "TestLines": [
+          "test postgres_native_typed_binding_roundtrip ... ok"
+        ]
+      },
+      {
+        "Name": "mysql-flow",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test integration mysql_full_flow -- --exact",
+        "ExitCode": 0,
+        "Passed": 1,
+        "Expected": 1,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-mysql-flow.log",
+        "TestLines": [
+          "test mysql_full_flow ... ok"
+        ]
+      },
+      {
+        "Name": "postgres-flow",
+        "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --test integration postgres_full_flow -- --exact",
+        "ExitCode": 0,
+        "Passed": 1,
+        "Expected": 1,
+        "Success": true,
+        "RealDatabase": true,
+        "Log": ".zcode/p202-postgres-flow.log",
+        "TestLines": [
+          "test postgres_full_flow ... ok"
+        ]
+      }
+    ],
+    "Manifest": "p202-db-lab-manifest.json",
+    "Mysql84RunThisRound": false,
+    "SqlServerRun": false,
+    "SqlServerReason": "用户无独立测试实例，网格维持既有只读限制"
+  },
+  "Checks": {
+    "CargoFmt": "通过",
+    "GitDiff": "通过",
+    "CiYamlAndTestTargets": "本地静态核对通过",
+    "GithubActionsExecuted": false,
+    "ExistingGridEditSafetyRestrictionsPreserved": true
+  },
+  "Workspace": {
+    "ExistingUncommittedChangesPreserved": true,
+    "Committed": false,
+    "Pushed": false,
+    "Published": false,
+    "UserExeReplaced": false,
+    "CurrentExeSha256": "8F0B3A90B53DD7E148821E2557DB5C187309236F634BAE5088F5508CC9FBCA55",
+    "UserWindowClosed": false
+  },
+  "Cleanup": {
+    "CompletedUtc": "2026-10-20T08:06:23.6204149Z",
+    "TemporaryDirectoriesDeleted": 2,
+    "DeletedBytes": 4585046671,
+    "BothTestInstancesGracefullyStopped": true,
+    "CredentialsAndDownloadArchiveDeleted": true,
+    "UserServicesChanged": false,
+    "CheckedResolvedPaths": true,
+    "CheckedReparsePoints": true,
+    "CheckedOwningProcesses": true
+  },
+  "SourceHashes": [
+    {
+      "Path": "src-tauri/src/export.rs",
+      "Sha256": "C82F460C4FA29B81255E5F2D401DEDDF8E75AE999E9995A7D69560A9C3714B91"
+    },
+    {
+      "Path": "src-tauri/src/atomic_export.rs",
+      "Sha256": "0434FCF804429C4C1D812390BA29528A5DE5AF20C8E2FEE3901A7156E0A77724"
+    },
+    {
+      "Path": "src-tauri/src/session.rs",
+      "Sha256": "FE5A0E4C3C7A7C186DCC2023C7CC2D8D16B5545BAE3EBADCC5E02D11414E02BA"
+    },
+    {
+      "Path": "src-tauri/src/database/mysql.rs",
+      "Sha256": "0C519FB7B275928D584E624C0B0115334097282734ECBAC4253135C413E95230"
+    },
+    {
+      "Path": "src-tauri/src/database/postgres.rs",
+      "Sha256": "44D5C47C197A1A619952E28F32C4C6DFDFDDC8A2D87EF0A6C9E61A412A09F4D2"
+    },
+    {
+      "Path": "src-tauri/src/database/mssql.rs",
+      "Sha256": "E94CF5C5601BB122F8F0BFBA7A249EDB18FA5BD16C7B1CADD75AE2F07ADB16EC"
+    },
+    {
+      "Path": "src-tauri/src/database/sqlite.rs",
+      "Sha256": "5DB0C4CC9771186DF7440CD167A93CCFA88E51F0B2A315B71C7370D768620E64"
+    },
+    {
+      "Path": "src-tauri/src/database/dump.rs",
+      "Sha256": "7C64FAA36BCA7C36A38D133A7AB59895B5FF300DDB4490E6B1F57B4A370AB5E3"
+    },
+    {
+      "Path": "src-tauri/src/commands/import.rs",
+      "Sha256": "24FE80194BED8B781C33A8D81D24C74405EBBA8D58521788C1E9BE697065C016"
+    },
+    {
+      "Path": "src-tauri/src/commands/query.rs",
+      "Sha256": "2922F1C5B2B75CCB4F3D93FBEE4BF163D7493F1AF6A3DD65493DE3DF0D95FC08"
+    },
+    {
+      "Path": "src-tauri/tests/export_sqlite.rs",
+      "Sha256": "AFBBAB4BB78A3139E5F3EEA5BF033D9F4B0B05924F24466FCA015874202EDCFF"
+    },
+    {
+      "Path": "src-tauri/tests/import_limits.rs",
+      "Sha256": "82CF2DA13D458A9914587E0E4F32E16FCB6E9A1CE9CCC70999C2E13B532F00FB"
+    },
+    {
+      "Path": "src-tauri/tests/export_mysql.rs",
+      "Sha256": "C1E73D1D885BE9E3CB35CF5923EC3DFE0F11DE5F287ABE1A8072CA96EBA1BFBB"
+    },
+    {
+      "Path": "src-tauri/tests/export_network.rs",
+      "Sha256": "0B346D5CD21CA53936AC3E0300800535C63A5C58D0B40D80EA2601DCA0FD30CB"
+    },
+    {
+      "Path": "src-tauri/tests/export_mysql_restore.rs",
+      "Sha256": "9EAA97A25836D8DB9ACD4F88683360E2D72DB5F707C9A4866B22746040C0ACF0"
+    },
+    {
+      "Path": "src/components/connection/ExportSqlDialog.tsx",
+      "Sha256": "0809DFEA28D35E5AC2A3FB3D1F0560DA3004A79D0B71F4F4479D53F4E64F19A5"
+    },
+    {
+      "Path": "src/components/connection/ImportSqlDialog.tsx",
+      "Sha256": "C853EAD33FECA859DFD475ED6C664275B328285B1FB7554E6556F3D55F32FDB6"
+    },
+    {
+      "Path": "tests/exportJob.component.test.tsx",
+      "Sha256": "0F504928C9B74776B90747DB29F9B3F552EB059C30F2D8AC57BBA009105F20BA"
+    },
+    {
+      "Path": ".github/workflows/ci.yml",
+      "Sha256": "C24799C87F1E563C68208E7CD3BD219334B56CD7191DA607458E8D408116790A"
+    }
+  ],
+  "Remaining": [
+    "完整 ImportPlan、事务策略预检及中断恢复检查点",
+    "整库一致性快照及完整 DDL/依赖恢复",
+    "暂不支持的无损类型、PG/MSSQL identity/generated 恢复",
+    "独立 SQL Server 实库、本轮桌面验收及 GitHub CI 实际运行",
+    "P2 01 剩余分页与首屏任务；P2 03 元数据全链路"
+  ]
+}

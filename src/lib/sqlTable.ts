@@ -15,7 +15,7 @@ export interface TableReference {
   end: number;
 }
 
-/** 只识别可确定来源的单表 SELECT；字符串与注释不参与语法判断。 */
+/** 仅提取候选表以固定读取来源，不能用于授予结果编辑权限。 */
 export function extractSingleTable(sql: string, driverType?: string): TableReference | null {
   const tokens: Token[] = [];
   let i = 0;

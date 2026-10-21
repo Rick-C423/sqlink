@@ -1,3 +1,6 @@
+import type { ResultContext } from "./resultContext";
+import type { TypedValue } from "./typedValue";
+
 export interface ConnectionConfig {
   id?: string;
   name: string;
@@ -27,10 +30,12 @@ export interface ColumnMetadata {
 }
 
 export interface RowData {
+  /** 超出 JavaScript 安全范围的标量整数以十进制字符串传输，禁止转回 Number。 */
   values: (string | number | boolean | null)[];
 }
 
 export interface QueryResult {
+  task?: import("./task").TaskSnapshot;
   columns: ColumnMetadata[];
   rows: RowData[];
   totalCount?: number;
@@ -38,6 +43,11 @@ export interface QueryResult {
   rowsAffected?: number;
   truncated?: boolean;
   error?: string;
+  /** 仅受控后端读取返回；不能从显示列或手工 SQL 自造。 */
+  resultContext?: ResultContext;
+  rowHandles?: (string | null)[];
+  /** 外层 null 表示无法无损读取；SQL NULL 使用 { kind: "null" }。 */
+  typedRows?: (TypedValue | null)[][];
 }
 
 /** 执行开始时固定的连接上下文，不随连接树的选择变化。 */
@@ -49,8 +59,10 @@ export interface QueryTarget {
 
 export interface QueryExecution extends QueryTarget {
   taskId: number;
-  /** 批量脚本暂不支持后端取消，因此没有 queryId。 */
+  /** 数字 ID 保留兼容，取消同时固定独立 UUID，不能重绑定任务。 */
   queryId?: number;
+  backendTaskId?: string;
+  canCancel?: boolean;
   sql: string;
   /** 单表结果刷新时使用已解析的完整表名。 */
   refreshSql?: string;
@@ -62,6 +74,32 @@ export interface ResolvedTable {
   schema?: string | null;
   table: string;
   columns: ColumnInfo[];
+  objectKind?: string | null;
+}
+
+/** 分段对象身份；名称里的点号、空格和分隔符都属于名称本身。 */
+export interface ObjectIdentity {
+  database: string;
+  schema?: string | null;
+  table: string;
+}
+
+export interface MetadataSnapshot {
+  connectionId: string;
+  connectionGeneration: string;
+  revision: string;
+  target: ResolvedTable;
+  indexes: IndexInfo[];
+  foreignKeys: ForeignKeyInfo[];
+}
+
+export interface ExecuteDdlRequest {
+  connectionId: string;
+  connectionGeneration: string;
+  database: string;
+  tableParts: string[];
+  revision: string;
+  statements: string[];
 }
 
 /** MCP 设置 + 运行状态快照（mcp_settings_get / mcp_settings_save 返回） */
@@ -100,6 +138,7 @@ export interface ImportSummary {
   statements: number;
   executed: number;
   skipped: number;
+  cleanupNotice?: string;
 }
 
 /** SQL 转储导出结果汇总 */
@@ -148,6 +187,10 @@ export interface IndexInfo {
   columns: string[];
   isUnique: boolean;
   isPrimary: boolean;
+  keyParts?: { column?: string | null; expression?: string | null; descending: boolean }[];
+  includedColumns?: string[];
+  definition?: string | null;
+  predicate?: string | null;
 }
 
 export interface ForeignKeyInfo {
@@ -155,6 +198,7 @@ export interface ForeignKeyInfo {
   columns: string[];
   refTable: string;
   refSchema?: string;
+  refDatabase?: string;
   refColumns: string[];
   onUpdate?: string;
   onDelete?: string;
@@ -168,6 +212,8 @@ export interface TreeNode {
   isExpanded?: boolean;
   isLoading?: boolean;
   metadata?: Record<string, unknown>;
+  /** 操作使用结构化来源，id 仅作 UI 键，不再从拼接字符串反解名称。 */
+  source?: { connectionId: string; database: string; schema?: string; table?: string };
 }
 
 /** 数据网格编辑上下文：结果集来自哪张表、主键是什么 */

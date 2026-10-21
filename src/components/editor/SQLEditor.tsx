@@ -276,9 +276,11 @@ export function SQLEditorPanel({ tabId, connectionId, onExecute, onExecuteAll, o
       {/* 工具栏 */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/20">
         {isExecuting ? (
-          <Button size="sm" variant="destructive" onClick={() => onCancel(tabId)} className="h-7">
+          <Button size="sm" variant="destructive" onClick={() => onCancel(tabId)} className="h-7"
+            disabled={tab.execution?.canCancel === false || tab.cancelRequested}
+            title={tab.execution?.canCancel === false ? "该驱动不支持取消，服务端任务可能仍在执行" : tab.cancelRequested ? "已请求取消，等待执行结果确认" : undefined}>
             <Square className="mr-1.5 h-3.5 w-3.5" />
-            {t("editor.cancelQuery")}
+            {tab.cancelRequested ? "已请求取消…" : t("editor.cancelQuery")}
           </Button>
         ) : (
           <Button

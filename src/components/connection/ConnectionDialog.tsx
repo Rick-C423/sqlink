@@ -6,6 +6,7 @@ import { Button, Input, Label, Select, Dialog, Alert } from "@/components/ui";
 import { Database, TestTube } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useT } from "@/i18n";
+import { CredentialStatus } from "@/components/connection/CredentialStatus";
 
 interface ConnectionDialogProps {
   open: boolean;
@@ -151,6 +152,7 @@ export function ConnectionDialog({ open, onClose, editing }: ConnectionDialogPro
       }
     >
       <div className="space-y-4">
+        <CredentialStatus compact className="rounded-md" />
         {testResult && (
           <Alert variant={testResult.success ? "default" : "destructive"}>
             {testResult.message}

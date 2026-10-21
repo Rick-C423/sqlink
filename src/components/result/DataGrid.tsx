@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EditContext, QueryResult } from "@/types/database";
 import { cn } from "@/lib/utils";
-import { buildEditStatements } from "@/lib/gridEdits";
+import { getGridEditPolicy } from "@/lib/gridEdits";
+import { compareGridValues } from "@/lib/gridSort";
+import { GridDraft, guardGridDraft, isGridDraftDirty, materializeGridDraft, useGridDraftStore } from "@/stores/gridDraftStore";
+import { buildGridDraftChangeSet, gridColumnInputKind, typedValueInputText, type GridCellIntent } from "@/lib/gridCellInput";
+import type { ResultContext } from "@/types/resultContext";
 import { Button } from "@/components/ui";
 import { Plus, Check, RotateCcw, Loader2, Pencil, Trash2, Undo2, Copy } from "lucide-react";
 import { useT } from "@/i18n";
@@ -16,8 +20,13 @@ export interface GridSort {
 interface DataGridProps {
   result: QueryResult | undefined;
   editContext?: EditContext | null;
-  /** 提交批量 UPDATE/INSERT（后端事务执行），成功后父组件会刷新结果 */
+  /** 页面稳定标识；草稿在组件卸载后仍归属于原页面。 */
+  draftKey?: string;
+  readOnlyReason?: string;
+  /** 兼容历史调用方；旧 SQL 保存回调不再执行。 */
   onApplyEdits?: (statements: string[]) => Promise<void>;
+  /** 已提交后按草稿固定的受控来源重新读取。 */
+  onRefreshCommitted?: (source: ResultContext) => Promise<void>;
   /**
    * 受控排序：分页数据（表数据浏览）必须由父组件把 ORDER BY 拼进查询，
    * 内存排序只能作用于当前已拉取的页。传入 onSortChange 后本地排序禁用，
@@ -27,27 +36,51 @@ interface DataGridProps {
   onSortChange?: (sort: GridSort) => void;
 }
 
-interface EditingCell {
-  key: string;
-  value: string;
-}
-
 /** 虚拟滚动参数：行高固定（px-1 + leading-5 + border 1px = 29px），只渲染可视区 ± OVERSCAN 行 */
 const ROW_HEIGHT = 29;
 const OVERSCAN = 10;
 
-export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortChange }: DataGridProps) {
+export function DataGrid({ result: incomingResult, editContext: incomingContext, draftKey, readOnlyReason, onRefreshCommitted, sortState, onSortChange }: DataGridProps) {
   const t = useT();
+  const instanceId = useId();
+  const key = draftKey ?? `grid:${instanceId}`;
+  const draft = useGridDraftStore((state) => state.drafts[key]);
+  const unresolved = draft?.saveState === "unknown" || draft?.saveState === "committedRefreshFailed";
+  const pinned = isGridDraftDirty(draft) || !!draft?.submitting || unresolved;
+  const result = pinned ? draft?.sourceResult : incomingResult;
+  const editContext = pinned ? draft?.sourceContext : incomingContext;
+  const policy = getGridEditPolicy(result, editContext);
+  const readonly = readOnlyReason || policy.reason;
+  const updateDraft = useGridDraftStore((state) => state.updateDraft);
+  const saveSnapshot = useCallback(async (snapshot: GridDraft) => {
+    const safety = getGridEditPolicy(snapshot.sourceResult, snapshot.sourceContext);
+    if (readOnlyReason || !safety.editable) throw new Error(readOnlyReason || safety.reason);
+    const source = snapshot.sourceResult?.resultContext;
+    if (!source || !onRefreshCommitted) throw new Error("当前草稿没有可用的受控刷新操作。");
+    const request = buildGridDraftChangeSet(snapshot);
+    return useGridDraftStore.getState().saveChangeSetDraft(key, request, () => onRefreshCommitted(source));
+  }, [key, onRefreshCommitted, readOnlyReason]);
+  const refreshSnapshot = useCallback(async () => {
+    if (!result?.resultContext || !onRefreshCommitted) throw new Error("当前草稿没有可用的受控刷新操作。");
+    await onRefreshCommitted(result.resultContext);
+  }, [result?.resultContext, onRefreshCommitted]);
+  useEffect(() => {
+    useGridDraftStore.getState().ensureDraft(key, incomingResult, incomingContext, undefined, saveSnapshot, refreshSnapshot);
+  }, [key, incomingResult, incomingContext, saveSnapshot, refreshSnapshot, pinned, draft?.submitting]);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   /** 已有行的编辑：key = `${origRowIdx}:${colIdx}`，value = 新文本 */
-  const [edits, setEdits] = useState<Record<string, string>>({});
+  const edits = draft?.edits ?? {};
   /** 新增行：每行是 colIdx -> 文本 */
-  const [newRows, setNewRows] = useState<Record<number, string>[]>([]);
+  const newRows = draft?.newRows ?? [];
   /** 标记删除的行（原始下标） */
-  const [deletedRows, setDeletedRows] = useState<Set<number>>(new Set());
-  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const deletedRows = draft?.deletedRows ?? new Set<number>();
+  const editingCell = draft?.editingCell ?? null;
+  const submitting = draft?.submitting ?? false;
+  const submitError = draft?.error ?? null;
+  const setNewRows = (update: (previous: GridDraft["newRows"]) => GridDraft["newRows"]) => updateDraft(key, (current) => ({ newRows: update(current.newRows) }));
+  const setDeletedRows = (update: (previous: GridDraft["deletedRows"]) => GridDraft["deletedRows"]) => updateDraft(key, (current) => ({ deletedRows: update(current.deletedRows) }));
+  const setEditingCell = (cell: GridDraft["editingCell"]) => updateDraft(key, () => ({ editingCell: cell }));
+  const setSubmitError = (error: string | null) => updateDraft(key, () => ({ error }));
   const [copied, setCopied] = useState(false);
   /** 会话内列宽调整（列名 -> 像素），查询列集合变化时重置 */
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
@@ -63,13 +96,8 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
 
   const columnSignature = result?.columns.map((c) => c.name).join("\u0001") ?? "";
 
-  // 结果集变化（重新执行）时清空所有未提交改动，回到顶部
+  // 仅在实际显示的数据变化时回到顶部；脏草稿继续显示其原始结果。
   useEffect(() => {
-    setEdits({});
-    setNewRows([]);
-    setDeletedRows(new Set());
-    setEditingCell(null);
-    setSubmitError(null);
     hideCellTip();
     scrollRef.current?.scrollTo({ top: 0 });
     setScrollTop(0);
@@ -107,7 +135,9 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
     setColWidths({});
   }, [columnSignature]);
 
-  const editable = !!editContext && !!onApplyEdits;
+  const editable = !readOnlyReason && policy.editable && !!onRefreshCommitted && !submitting && !unresolved;
+  const permits = (operation: string) => editable && !!result?.resultContext?.editPolicy.allowedOperations.includes(operation);
+  const columnEditable = (index: number) => !!gridColumnInputKind(result, index);
   const hasPrimaryKey = (editContext?.primaryKeys.length ?? 0) > 0;
 
   /** 当前生效的排序：受控模式用父组件状态，否则用本地状态 */
@@ -125,73 +155,22 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
     return [...indexed].sort((a, b) => {
       const aVal = a.row.values[colIndex];
       const bVal = b.row.values[colIndex];
-      if (aVal == null && bVal == null) return 0;
-      if (aVal == null) return 1;
-      if (bVal == null) return -1;
-      if (typeof aVal === "number" && typeof bVal === "number") {
-        return sortConfig.direction === "asc" ? aVal - bVal : bVal - aVal;
-      }
-      const aStr = String(aVal);
-      const bStr = String(bVal);
-      return sortConfig.direction === "asc" ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+      return compareGridValues(result.columns[colIndex], aVal, bVal, sortConfig.direction);
     });
   }, [result, sortConfig, onSortChange]);
 
-  const pendingCount =
-    Object.keys(edits).length +
-    newRows.filter((r) => Object.keys(r).length > 0).length +
-    deletedRows.size;
+  const currentDraft = draft && materializeGridDraft(draft);
+  const pendingCount = currentDraft ? Object.keys(currentDraft.edits).length + currentDraft.newRows.length + currentDraft.deletedRows.size : 0;
 
-  const commitEdit = (key: string, value: string, original: string) => {
-    setEdits((prev) => {
-      const next = { ...prev };
-      if (value === original) delete next[key];
-      else next[key] = value;
-      return next;
-    });
-    setEditingCell(null);
+  const commitCell = (cellKey: string, value: string, intent?: GridCellIntent) => {
+    updateDraft(key, (current) => materializeGridDraft({ ...current,
+      editingCell: { key: cellKey, value, intent: intent ?? current.editingCell?.intent ?? "value" } }));
   };
 
-  const commitNewRowCell = (rowIdx: number, colIdx: number, value: string) => {
-    setNewRows((prev) => {
-      const next = [...prev];
-      const row = { ...next[rowIdx] };
-      if (value === "") delete row[colIdx];
-      else row[colIdx] = value;
-      next[rowIdx] = row;
-      return next;
-    });
-    setEditingCell(null);
-  };
-
-  /** 生成批量 UPDATE / INSERT / DELETE 语句 */
-  const buildStatements = (): string[] => {
-    if (!result || !editContext) return [];
-    return buildEditStatements(result, editContext, edits, newRows, deletedRows);
-  };
-
-  const handleSubmit = async () => {
-    if (!onApplyEdits) return;
-    const statements = buildStatements();
-    if (statements.length === 0) return;
-    setSubmitting(true);
-    setSubmitError(null);
-    try {
-      await onApplyEdits(statements);
-      // 父组件会刷新结果，useEffect 负责清空本地状态
-    } catch (err) {
-      setSubmitError(String(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const handleSubmit = () => useGridDraftStore.getState().saveDraft(key);
 
   const handleDiscard = () => {
-    setEdits({});
-    setNewRows([]);
-    setDeletedRows(new Set());
-    setEditingCell(null);
-    setSubmitError(null);
+    useGridDraftStore.getState().discardDraft(key);
   };
 
   /** 复制全部结果为 TSV（无表头，方便直接粘贴到编辑器执行/粘贴到 Excel） */
@@ -369,7 +348,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
   const renderCellValue = (origIdx: number, colIdx: number, value: unknown) => {
     const key = `${origIdx}:${colIdx}`;
     const edited = edits[key];
-    const display = edited !== undefined ? edited : value;
+    const display = draft?.cellIntents?.[key] === "null" ? null : draft?.cellIntents?.[key] === "default" ? "DEFAULT" : edited !== undefined ? edited : value;
 
     return (
       <>
@@ -387,23 +366,28 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
     );
   };
 
-  /** 编辑中的单元格 input */
-  const renderCellInput = (
-    key: string,
-    initial: string,
-    onCommit: (value: string) => void
-  ) => (
-    <input
-      autoFocus
-      className="w-full px-1 py-0.5 text-sm border border-blue-400 rounded outline-none bg-white dark:bg-gray-900"
-      value={editingCell?.value ?? initial}
-      onChange={(e) => setEditingCell({ key, value: e.target.value })}
-      onBlur={(e) => onCommit(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onCommit((e.target as HTMLInputElement).value);
-        if (e.key === "Escape") setEditingCell(null);
-      }}
-    />
+  /** SQL NULL 通过明确按钮表达，文本 NULL 和空串仍是文本。 */
+  const renderCellInput = (cellKey: string, initial: string, colIndex: number) => (
+    <span className="flex items-center gap-1">
+      <input
+        autoFocus
+        aria-label={`编辑 ${result.columns[colIndex]?.name}`}
+        placeholder={gridColumnInputKind(result, colIndex) === "binary" ? "十六进制字节，例如 00ff" : undefined}
+        disabled={!editable}
+        className="w-full min-w-16 px-1 py-0.5 text-sm border border-blue-400 rounded outline-none bg-white dark:bg-gray-900"
+        value={editingCell?.value ?? initial}
+        onChange={(e) => setEditingCell({ key: cellKey, value: e.target.value, intent: "value" })}
+        onBlur={(e) => commitCell(cellKey, e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commitCell(cellKey, (e.target as HTMLInputElement).value);
+          if (e.key === "Escape") setEditingCell(null);
+        }}
+      />
+      {result.resultContext?.columns[colIndex].nullable && <button title="设为 SQL NULL" onMouseDown={(e) => e.preventDefault()}
+        onClick={() => commitCell(cellKey, "", "null")}>NULL</button>}
+      {cellKey.startsWith("new:") && <button title="省略字段，使用 DEFAULT" onMouseDown={(e) => e.preventDefault()}
+        onClick={() => commitCell(cellKey, "", "default")}>DEFAULT</button>}
+    </span>
   );
 
   // h-7 + leading-5 把行高钉在 28px（= ROW_HEIGHT），虚拟滚动的占位计算依赖这一点
@@ -436,7 +420,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
         </span>
 
         <div className="flex items-center gap-2">
-          {editable && hasPrimaryKey && (
+          {permits("insert") && (
             <Button
               variant="ghost"
               size="sm"
@@ -454,7 +438,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                 size="sm"
                 className="h-6 text-xs"
                 onClick={handleSubmit}
-                disabled={submitting}
+                disabled={submitting || !editable}
               >
                 {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
                 {t("grid.submit")}
@@ -464,13 +448,17 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                 size="sm"
                 className="h-6 text-xs"
                 onClick={handleDiscard}
-                disabled={submitting}
+                disabled={submitting || unresolved}
               >
                 <RotateCcw className="h-3 w-3 mr-1" />
                 {t("grid.discard")}
               </Button>
             </>
           )}
+          {draft?.saveState === "unknown" && <Button size="sm" disabled={submitting}
+            onClick={() => useGridDraftStore.getState().checkChangeSetReceipt(key)}>核查回执</Button>}
+          {draft?.saveState === "committedRefreshFailed" && <Button size="sm" disabled={submitting}
+            onClick={() => useGridDraftStore.getState().refreshCommittedDraft(key)}>重试读取</Button>}
           <Button
             variant="ghost"
             size="sm"
@@ -485,9 +473,18 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
         </div>
       </div>
 
+      {!editable && readonly && (
+        <div className="px-3 py-1.5 border-b bg-muted/20 text-xs text-muted-foreground" role="status">只读：{readonly}</div>
+      )}
+      {pinned && result !== incomingResult && (
+        <div className="px-3 py-1.5 border-b border-amber-200 bg-amber-50 text-xs text-amber-800" role="status">
+          当前显示未保存草稿对应的原始数据。新的查询结果已到达，保存或放弃草稿后显示新结果。
+        </div>
+      )}
+
       {submitError && (
         <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">
-          {t("grid.submitFailed", { error: submitError })}
+          {submitError}
         </div>
       )}
 
@@ -508,7 +505,8 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                   key={col.name}
                   className="relative overflow-hidden px-3 py-1.5 text-left font-semibold text-xs border-b border-r cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 whitespace-nowrap select-none bg-gray-100 dark:bg-gray-800"
                   style={columnStyle(col.name)}
-                  onClick={() => {
+                  onClick={async () => {
+                    if (submitting) return;
                     if (onSortChange) {
                       // 分页浏览：排序交给父组件重查（ORDER BY 下推数据库）
                       onSortChange({
@@ -520,6 +518,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                       });
                       return;
                     }
+                    if (!await guardGridDraft(key)) return;
                     setSortConfig((prev) =>
                       prev?.key === col.name
                         ? { key: col.name, direction: prev.direction === "asc" ? "desc" : "asc" }
@@ -563,7 +562,8 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
             {visibleRows.map(({ row, origIdx }, i) => {
               const rowIndex = startIdx + i;
               const isDeleted = deletedRows.has(origIdx);
-              const canEdit = editable && hasPrimaryKey;
+              const canEdit = permits("update") && !!result.rowHandles?.[origIdx];
+              const canDelete = permits("delete") && !!result.rowHandles?.[origIdx];
               return (
                 <tr
                   key={origIdx}
@@ -574,7 +574,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                   )}
                 >
                   <td className="px-2 py-1 border-b border-r text-center text-xs text-gray-400 w-12">
-                    {canEdit ? (
+                    {canDelete ? (
                       <span className="relative inline-block w-6">
                         <span className={cn("group-hover/row:invisible", isDeleted && "invisible")}>
                           {rowIndex + 1}
@@ -586,6 +586,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                             isDeleted ? "flex" : "hidden group-hover/row:flex"
                           )}
                           onClick={() => toggleDeleteRow(origIdx)}
+                          disabled={submitting}
                         >
                           {isDeleted ? (
                             <Undo2 className="h-3 w-3 text-green-600" />
@@ -600,21 +601,23 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                   </td>
                   {row.values.map((value, colIndex) => {
                     const key = `${origIdx}:${colIndex}`;
-                    const original = value === null || value === undefined ? "NULL" : String(value);
+                    const typed = result.typedRows?.[origIdx]?.[colIndex];
+                    const original = result.resultContext ? typedValueInputText(typed) : value == null ? "NULL" : String(value);
+                    const cellWritable = canEdit && columnEditable(colIndex) && !!typed;
                     const edited = edits[key];
                     return (
                       <td
                         key={colIndex}
                         className={cn(
                           cellBase,
-                          canEdit && !isDeleted && "cursor-cell",
+                          cellWritable && !isDeleted && "cursor-cell",
                           edited !== undefined && "bg-amber-50 dark:bg-amber-900/20"
                         )}
                         style={columnStyle(result.columns[colIndex]?.name ?? "")}
                         onDoubleClick={() => {
-                          if (canEdit && !isDeleted) {
+                          if (cellWritable && !isDeleted) {
                             hideCellTip();
-                            setEditingCell({ key, value: edited ?? original });
+                            setEditingCell({ key, value: edited ?? original, intent: draft?.cellIntents?.[key] ?? (typed?.kind === "null" ? "null" : "value") });
                           }
                         }}
                         onMouseEnter={(e) => {
@@ -625,7 +628,7 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                         onMouseLeave={hideCellTipSoon}
                       >
                         {editingCell?.key === key
-                          ? renderCellInput(key, original, (v) => commitEdit(key, v, original))
+                          ? renderCellInput(key, original, colIndex)
                           : renderCellValue(origIdx, colIndex, value)}
                       </td>
                     );
@@ -658,8 +661,9 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                       className={cn(cellBase, "cursor-cell")}
                       style={columnStyle(result.columns[colIndex]?.name ?? "")}
                       onDoubleClick={() => {
+                        if (!permits("insert") || !columnEditable(colIndex)) return;
                         hideCellTip();
-                        setEditingCell({ key, value: current });
+                        setEditingCell({ key, value: current, intent: draft?.cellIntents?.[key] ?? (newRow[colIndex] === undefined ? "default" : "value") });
                       }}
                       onMouseEnter={(e) => {
                         if (editingCell?.key !== key && current) {
@@ -669,8 +673,10 @@ export function DataGrid({ result, editContext, onApplyEdits, sortState, onSortC
                       onMouseLeave={hideCellTipSoon}
                     >
                       {editingCell?.key === key
-                        ? renderCellInput(key, current, (v) => commitNewRowCell(newIdx, colIndex, v))
-                        : current || <span className="text-gray-300 italic">{t("grid.doubleClickEdit")}</span>}
+                        ? renderCellInput(key, current, colIndex)
+                        : draft?.cellIntents?.[key] === "null" ? <span className="text-gray-400 italic">NULL</span>
+                          : newRow[colIndex] !== undefined ? current === "" ? <span className="text-gray-400 italic">空串</span> : current
+                          : <span className="text-gray-300 italic">{columnEditable(colIndex) ? "DEFAULT" : "只读"}</span>}
                     </td>
                   );
                 })}

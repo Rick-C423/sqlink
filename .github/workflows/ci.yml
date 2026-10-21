@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: 前端类型、组件与回归测试
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  rust:
+    name: Rust 与 SQLite、PostgreSQL、MySQL 实库
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sqlink
+          POSTGRES_PASSWORD: sqlink_ci_only
+          POSTGRES_DB: sqlink_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sqlink_ci_only
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: sqlink_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -psqlink_ci_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      SQLINK_TEST_POSTGRES: postgres://sqlink:sqlink_ci_only@127.0.0.1:5432/sqlink_ci
+      SQLINK_TEST_MYSQL: mysql://root:sqlink_ci_only@127.0.0.1:3306/sqlink_ci
+      SQLINK_TEST_MYSQL_OTHER_DATABASE: sqlink_metadata_other
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: 准备 Tauri 编译所需前端资源
+        run: npm ci
+      - run: npm run build
+      - name: 检查专用实库配置（缺失必须失败）
+        run: |
+          test -n "${SQLINK_TEST_POSTGRES:-}"
+          test -n "${SQLINK_TEST_MYSQL:-}"
+      - name: 安装 Tauri 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libdbus-1-dev patchelf default-mysql-client
+      - run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+      - name: Rust 单元测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: SQLite 实库集成
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test integration sqlite_full_flow -- --exact
+      - name: 普通查询大整数传输及转储类型 SQLite 回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test plain_query_integers
+      - name: 读取预算与截断身份 SQLite 回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test query_budget_sqlite
+      - name: 流式原值导出与有界单租约导入 SQLite 回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test export_sqlite --test import_limits
+      - name: 完整元数据身份、结构修订与导出来源 SQLite 回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test metadata_sqlite --test metadata_service
+      - name: 首屏统计解耦、分页游标及导入任务恢复 SQLite 回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test dataset_sqlite --test import_job_sqlite --test import_job_recovery
+      - name: PostgreSQL 与 MySQL 分页统计、导入预检及取消实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test dataset_network --test import_job_pg_mysql -- --ignored
+      - name: PostgreSQL 非默认 schema 元数据与导出实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test metadata_network postgres_metadata_preserves_complete_identity -- --ignored --exact
+      - name: MySQL 跨库同名对象与功能索引实库回归
+        env:
+          MYSQL_PWD: sqlink_ci_only
+        run: |
+          mysql --protocol=tcp --host=127.0.0.1 --user=root --execute="CREATE DATABASE sqlink_metadata_other CHARACTER SET utf8mb4"
+          cargo test --manifest-path src-tauri/Cargo.toml --test metadata_mysql -- --ignored
+          cargo test --manifest-path src-tauri/Cargo.toml --test import_skip_mysql -- --ignored
+      - name: SQL Server 元数据测试仅编译（缺实例不冒充运行）
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test metadata_network --no-run
+      - name: SQL Server 预算实库测试编译（缺实例不冒充运行）
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test query_budget_mssql --no-run
+      - name: 可信结果与行身份 SQLite 实库集成
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test result_context
+      - name: 类型绑定与变更预检 SQLite 实库集成
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test typed_binding_sqlite --test changeset
+      - name: 独占会话、任务取消与导入 SQLite 实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test session_sqlite --test query_tasks --test import_session
+      - name: 受控提交对象身份 SQLite 实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test commit_identity_sqlite
+      - name: PostgreSQL 实库集成
+        run: |
+          test -n "$SQLINK_TEST_POSTGRES"
+          cargo test --manifest-path src-tauri/Cargo.toml --test integration postgres_full_flow -- --exact
+      - name: PostgreSQL 取消登记清理实库回归（配置或连接缺失必须失败）
+        run: cargo test --manifest-path src-tauri/Cargo.toml postgres_cancel_cleanup -- --ignored
+      - name: PostgreSQL 可信结果与行身份实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test result_context_network postgres_controlled_result_context -- --ignored --exact
+      - name: PostgreSQL 类型参数实库回环
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test typed_binding_network postgres_native_typed_binding_roundtrip -- --ignored --exact
+      - name: PostgreSQL 独占会话与取消生命周期实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test session_pg_mysql postgres_session_isolation_cancellation -- --ignored --exact
+      - name: PostgreSQL 提交对象身份与事务锁实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test commit_identity_network postgres_commit_identity_and_lease_locks -- --ignored --exact
+      - name: MySQL 基础实库集成
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test integration mysql_full_flow -- --exact
+      - name: MySQL 类型参数实库回环
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test typed_binding_mysql_network mysql_native_binding_round_trip -- --ignored --exact
+      - name: MySQL 可信结果与行身份实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test result_context_network mysql_controlled_result_context -- --ignored --exact
+      - name: MySQL 独占会话与取消生命周期实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test session_pg_mysql mysql_session_isolation_cancellation -- --ignored --exact
+      - name: MySQL 提交对象身份与事务锁实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test commit_identity_network mysql_commit_identity_and_lease_locks -- --ignored --exact
+      - name: PostgreSQL 与 MySQL 受控提交及会话门禁实库回归
+        run: |
+          test -n "${SQLINK_TEST_POSTGRES:-}"
+          test -n "${SQLINK_TEST_MYSQL:-}"
+          cargo test --manifest-path src-tauri/Cargo.toml --lib commit::network_tests:: -- --ignored
+      - name: PostgreSQL 与 MySQL 读取预算及未读流隔离实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test query_budget_postgres --test query_budget_mysql -- --ignored
+      - name: PostgreSQL 流式导出与类型回环实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test export_network postgres_stream_csv_and_dump_preserve_values_above_query_limit -- --ignored --exact
+      - name: MySQL 流式导出与跨库恢复实库回归
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test export_mysql --test export_mysql_restore -- --ignored
+

@@ -1,0 +1,230 @@
+{
+  "scope": "当前本地未提交工作区；仅本轮隔离测试实例",
+  "date": "2026-10-20",
+  "rustDefault": {
+    "legacyNetworkEarlyReturnExcluded": 3,
+    "unitPassed": 134,
+    "failed": 0,
+    "sqliteAndLocalIntegrationPassed": 42
+  },
+  "records": [
+    {
+      "summary": [
+        "test mysql_full_flow ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.15s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:07.0405541Z",
+      "name": "mysql_full_flow"
+    },
+    {
+      "summary": [
+        "test postgres_full_flow ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.98s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:08.1448535Z",
+      "name": "postgres_full_flow"
+    },
+    {
+      "summary": [
+        "test mysql_native_binding_round_trip ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:09.7946744Z",
+      "name": "mysql_native_binding_round_trip"
+    },
+    {
+      "summary": [
+        "test postgres_native_typed_binding_roundtrip ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.49s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:10.3195944Z",
+      "name": "postgres_native_typed_binding_roundtrip"
+    },
+    {
+      "summary": [
+        "test mysql_controlled_result_context ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.22s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:10.5803467Z",
+      "name": "mysql_controlled_result_context"
+    },
+    {
+      "summary": [
+        "test postgres_controlled_result_context ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 5.07s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:15.9072181Z",
+      "name": "postgres_controlled_result_context"
+    },
+    {
+      "summary": [
+        "test postgres_session_isolation_cancellation ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.27s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:20.2453998Z",
+      "name": "postgres_session_isolation_cancellation"
+    },
+    {
+      "summary": [
+        "test mysql_commit_identity_and_lease_locks ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 3.21s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:24.3916115Z",
+      "name": "mysql_commit_identity_and_lease_locks"
+    },
+    {
+      "summary": [
+        "test postgres_commit_identity_and_lease_locks ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 1.37s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:42:25.7970942Z",
+      "name": "postgres_commit_identity_and_lease_locks"
+    },
+    {
+      "summary": [
+        "test store::tests::isolated_system_keychain_roundtrip_and_migration ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 140 filtered out; finished in 0.03s"
+      ],
+      "exitCode": 0,
+      "endUtc": null,
+      "name": "isolated_system_keychain_roundtrip_and_migration"
+    },
+    {
+      "summary": [
+        "test database::postgres::tests::postgres_cancel_cleanup ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 142 filtered out; finished in 0.78s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:51:38.6396721Z",
+      "name": "database::postgres::tests::postgres_cancel_cleanup"
+    },
+    {
+      "summary": [
+        "test mysql_full_flow ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.09s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:51:40.7725583Z",
+      "name": "mysql57_mysql_full_flow"
+    },
+    {
+      "summary": [
+        "test mysql_native_binding_round_trip ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:51:42.0278569Z",
+      "name": "mysql57_mysql_native_binding_round_trip"
+    },
+    {
+      "summary": [
+        "test mysql_controlled_result_context ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.06s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:51:43.6687903Z",
+      "name": "mysql57_mysql_controlled_result_context"
+    },
+    {
+      "summary": [
+        "test mysql_session_isolation_cancellation ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.07s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:56:47.1716879Z",
+      "name": "mysql_session_isolation_cancellation"
+    },
+    {
+      "summary": [
+        "test mysql_session_isolation_cancellation ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.14s"
+      ],
+      "exitCode": 0,
+      "endUtc": "2026-10-20T04:56:52.5921538Z",
+      "name": "mysql57_mysql_session_isolation_cancellation"
+    },
+    {
+      "summary": [
+        "test commit::network_tests::mysql_held_global_grant_cannot_prove_trigger_visibility ... ok",
+        "test commit::network_tests::mysql_crud_exact_values_and_receipt_idempotence ... ok",
+        "test commit::network_tests::mysql_recreated_object_rejects_old_context ... ok",
+        "test commit::network_tests::mysql_conflict_and_constraint_failure_are_atomic ... ok",
+        "test commit::network_tests::postgres_crud_exact_values_and_receipt_idempotence ... ok",
+        "test commit::network_tests::postgres_recreated_object_rejects_old_context ... ok",
+        "test commit::network_tests::postgres_conflict_and_constraint_failure_are_atomic ... ok",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 136 filtered out; finished in 0.70s"
+      ],
+      "exitCode": 0,
+      "group": "commit_network_tests",
+      "endUtc": "2026-10-20T04:50:44.5342724Z"
+    },
+    {
+      "summary": [
+        "test commit::network_tests::mysql_disabled_session_checks_block_writes_and_do_not_leak_to_next_lease ... ok",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 143 filtered out; finished in 0.07s"
+      ],
+      "exitCode": 0,
+      "group": "commit_network_tests",
+      "endUtc": "2026-10-20T04:57:57.8810416Z"
+    }
+  ],
+  "windowsIsolatedKeychainPassed": 1,
+  "frontend": {
+    "failed": 0,
+    "build": "passed",
+    "passed": 140
+  },
+  "networkDatabasePassed": 23,
+  "environmentCleanup": {
+    "status": "completed",
+    "temporaryDatabaseInstancesStopped": true,
+    "temporaryDatabaseDirectoriesDeleted": true,
+    "temporaryRustTargetDeleted": true,
+    "isolatedDesktopExeAndProfileDeleted": true,
+    "isolatedKeychainEntry": "NoEntry/1168",
+    "existingUserExeUnchanged": true,
+    "existingUserWindowPreserved": true
+  },
+  "supplementalChecks": [
+    {
+      "name": "commit::network_tests::mysql_held_global_grant_cannot_prove_trigger_visibility",
+      "reason": "随机测试账号 host 改为复用 CURRENT_USER() 的有效 host 后补跑；不重复计入主矩阵",
+      "endUtc": "2026-10-20T05:35:56Z",
+      "passed": 1,
+      "failed": 0,
+      "exitCode": 0
+    },
+    {
+      "name": "mcp::tests::whitelist_filters_denied_and_unsaved_connections",
+      "reason": "隔离钥匙串清理兼容无桌面凭据服务的环境后补跑",
+      "passed": 1,
+      "failed": 0,
+      "exitCode": 0
+    }
+  ],
+  "sqlServer": {
+    "status": "not_run",
+    "reason": "用户明确无独立测试实例；未运行且继续只读"
+  },
+  "desktop": {
+    "evidence": "P1桌面验收记录.md",
+    "status": "passed_with_documented_limits",
+    "published": false,
+    "engines": [
+      "MySQL 8.4.11",
+      "PostgreSQL 17.11",
+      "SQLite"
+    ],
+    "userAcceptance": "pending",
+    "externalReadback": "p1-desktop-readback.json"
+  }
+}

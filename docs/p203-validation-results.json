@@ -1,0 +1,492 @@
+{
+  "GeneratedUtc": "2026-10-20T09:20:29.157645+00:00",
+  "Scope": "P2 03 元数据身份全链路；保留既有未提交修改、用户独立文档和现有网格门禁。",
+  "GitHead": "53abb8f53be5a2513482d0118787eabba83d4280",
+  "Frontend": {
+    "Passed": 198,
+    "Failed": 0,
+    "ProductionBuild": "通过，仅既有 Monaco 大 chunk 提示",
+    "Log": ".zcode/p203-frontend-final.log",
+    "BuildLog": ".zcode/p203-build-final.log",
+    "DesktopExeAcceptanceThisRound": false
+  },
+  "Rust": {
+    "UnitPassed": 169,
+    "UnitIgnored": 11,
+    "SqliteAndLocalIntegrationPassed": 88,
+    "LegacyNetworkEarlyReturnExcluded": 3,
+    "RawHarnessPassed": 260,
+    "Failed": 0,
+    "NewMetadataSqliteAndServicePassed": 16,
+    "Targets": [
+      {
+        "Target": "lib",
+        "Passed": 169,
+        "Failed": 0,
+        "Ignored": 11
+      },
+      {
+        "Target": "main",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "changeset",
+        "Passed": 3,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "commit_identity_network",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 3
+      },
+      {
+        "Target": "commit_identity_sqlite",
+        "Passed": 8,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "export_mysql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "export_mysql_restore",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 1
+      },
+      {
+        "Target": "export_network",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "export_sqlite",
+        "Passed": 10,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "import_limits",
+        "Passed": 11,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "import_session",
+        "Passed": 2,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "import_skip_mysql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 4
+      },
+      {
+        "Target": "integration",
+        "Passed": 4,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "metadata_mysql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 3
+      },
+      {
+        "Target": "metadata_network",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "metadata_service",
+        "Passed": 12,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "metadata_sqlite",
+        "Passed": 4,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "plain_query_integers",
+        "Passed": 3,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "query_budget_mssql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 1
+      },
+      {
+        "Target": "query_budget_mysql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "query_budget_postgres",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "query_budget_sqlite",
+        "Passed": 6,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "query_tasks",
+        "Passed": 4,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "result_context",
+        "Passed": 7,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "result_context_network",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 3
+      },
+      {
+        "Target": "session_mssql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 1
+      },
+      {
+        "Target": "session_pg_mysql",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "session_sqlite",
+        "Passed": 9,
+        "Failed": 0,
+        "Ignored": 0
+      },
+      {
+        "Target": "typed_binding_mysql_network",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 1
+      },
+      {
+        "Target": "typed_binding_network",
+        "Passed": 0,
+        "Failed": 0,
+        "Ignored": 2
+      },
+      {
+        "Target": "typed_binding_sqlite",
+        "Passed": 8,
+        "Failed": 0,
+        "Ignored": 0
+      }
+    ],
+    "Command": "cargo test --release --offline --manifest-path src-tauri/Cargo.toml --lib --tests",
+    "Log": ".zcode/p203-rust-final.log",
+    "MsSqlMetadataCompiled": true,
+    "MsSqlRealAcceptance": false
+  },
+  "RealDatabases": {
+    "MySqlVersion": "8.4.11",
+    "PostgresVersion": "17.11",
+    "UniquePassed": 20,
+    "Cases": [
+      {
+        "Name": "metadata-mysql",
+        "StartedUtc": "2026-10-20T09:01:22.4958057Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "metadata_mysql",
+          "--",
+          "--ignored"
+        ],
+        "Log": ".zcode/p203-metadata-mysql.log",
+        "Summary": [
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s"
+        ],
+        "TestNames": [
+          "functional_index_retains_null_column_position_expression_and_descending",
+          "quoted_names_and_prefix_indexes_are_complete_under_default_sql_mode",
+          "cross_database_same_names_preserve_composite_foreign_keys_and_real_unique_flags"
+        ]
+      },
+      {
+        "Name": "metadata-postgres",
+        "StartedUtc": "2026-10-20T09:15:41.5580339Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "metadata_network",
+          "postgres_metadata_preserves_complete_identity",
+          "--",
+          "--ignored",
+          "--exact"
+        ],
+        "Log": ".zcode/p203-metadata-postgres-final.log",
+        "Summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.53s"
+        ],
+        "TestNames": [
+          "postgres_metadata_preserves_complete_identity"
+        ]
+      },
+      {
+        "Name": "mysql-export",
+        "StartedUtc": "2026-10-20T09:15:44.1463363Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "export_mysql",
+          "--test",
+          "export_mysql_restore",
+          "--",
+          "--ignored"
+        ],
+        "Log": ".zcode/p203-mysql-export-final.log",
+        "Summary": [
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s"
+        ],
+        "TestNames": [
+          "mysql_export_errors_cancel_and_raw_limits_quarantine_lease",
+          "mysql_export_preserves_native_values_and_more_than_ten_thousand_rows",
+          "mysql_dump_restores_into_selected_database_without_touching_source"
+        ]
+      },
+      {
+        "Name": "postgres-export",
+        "StartedUtc": "2026-10-20T09:15:45.0920161Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "export_network",
+          "postgres_stream_csv_and_dump_preserve_values_above_query_limit",
+          "--",
+          "--ignored",
+          "--exact"
+        ],
+        "Log": ".zcode/p203-postgres-export-final.log",
+        "Summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.64s"
+        ],
+        "TestNames": [
+          "postgres_stream_csv_and_dump_preserve_values_above_query_limit"
+        ]
+      },
+      {
+        "Name": "query-budgets",
+        "StartedUtc": "2026-10-20T09:05:45.2651594Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "query_budget_mysql",
+          "--test",
+          "query_budget_postgres",
+          "--",
+          "--ignored"
+        ],
+        "Log": ".zcode/p203-query-budgets.log",
+        "Summary": [
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s"
+        ],
+        "TestNames": [
+          "mysql_byte_and_cell_limits_preserve_whole_aligned_rows",
+          "mysql_stream_limit_closes_unread_lease_without_draining_slow_tail",
+          "postgres_row_limit_stops_before_slow_tail_and_quarantines_lease",
+          "postgres_byte_budget_and_oversized_cells_keep_typed_rows_aligned"
+        ]
+      },
+      {
+        "Name": "session-isolation",
+        "StartedUtc": "2026-10-20T09:05:49.7260590Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "session_pg_mysql",
+          "--",
+          "--ignored"
+        ],
+        "Log": ".zcode/p203-session-isolation.log",
+        "Summary": [
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.07s"
+        ],
+        "TestNames": [
+          "postgres_session_isolation_cancellation",
+          "mysql_session_isolation_cancellation"
+        ]
+      },
+      {
+        "Name": "commit-identity",
+        "StartedUtc": "2026-10-20T09:05:59.3162280Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "commit_identity_network",
+          "postgres_commit_identity_and_lease_locks",
+          "--",
+          "--ignored",
+          "--exact"
+        ],
+        "Log": ".zcode/p203-commit-identity.log",
+        "Summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 1.34s"
+        ],
+        "TestNames": [
+          "postgres_commit_identity_and_lease_locks"
+        ]
+      },
+      {
+        "Name": "mysql-commit-identity",
+        "StartedUtc": "2026-10-20T09:06:05.9243088Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "commit_identity_network",
+          "mysql_commit_identity_and_lease_locks",
+          "--",
+          "--ignored",
+          "--exact"
+        ],
+        "Log": ".zcode/p203-mysql-commit-identity.log",
+        "Summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 3.30s"
+        ],
+        "TestNames": [
+          "mysql_commit_identity_and_lease_locks"
+        ]
+      },
+      {
+        "Name": "mysql-skip",
+        "StartedUtc": "2026-10-20T09:15:35.6955595Z",
+        "ExitCode": 0,
+        "Arguments": [
+          "--test",
+          "import_skip_mysql",
+          "--",
+          "--ignored"
+        ],
+        "Log": ".zcode/p203-mysql-skip-final.log",
+        "Summary": [
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+        ],
+        "TestNames": [
+          "repeated_create_in_one_script_rechecks_current_existence_after_prior_ddl",
+          "use_changes_unqualified_create_lookup_and_keeps_file_in_one_session",
+          "existing_main_name_does_not_skip_missing_qualified_other_target",
+          "existing_exact_qualified_other_target_skips_only_create_and_imports_data"
+        ]
+      }
+    ],
+    "SqlServer": "用户无实例，未运行，继续保持网格只读。"
+  },
+  "Metadata": {
+    "BackendSnapshotSerializedBytes": 16777216,
+    "CacheEntries": 128,
+    "CacheBytes": 8388608,
+    "CacheTtlMs": 30000,
+    "NativeCatalogCollectionFullyStreaming": false,
+    "ProcessRssHardLimit": false,
+    "RevisionFields": "连接代次、解析对象和列、索引、外键；非物理世代，不含CHECK/触发器，非跨会话原子锁。"
+  },
+  "Preservation": {
+    "NoTrackedDeletions": true,
+    "NoCommitPushRelease": true,
+    "CurrentExeSha256": "8F0B3A90B53DD7E148821E2557DB5C187309236F634BAE5088F5508CC9FBCA55",
+    "CurrentExeUnchanged": true,
+    "UserStandaloneDocument": "docs/MCP调用参数.md 本轮未编辑。",
+    "UserStandaloneDocumentSha256": "A9F2747A27C9DC324351DE27664F139E91AA65F160F4E69B16BD73101D04CC36"
+  },
+  "SourceSha256": {
+    ".github/workflows/ci.yml": "2689F4433E67FF99ECFBAFB114BE66CC2085D7D150C53DA87E943BFB7C96A8CF",
+    "src-tauri/src/commands/import.rs": "C4CFBA54A9C06595F7D28C13ACD9290FB51F54BC5350C19CC703BE40B5F50CC3",
+    "src-tauri/src/commands/query.rs": "D19ADACA71B4AE9F13A9BEA94025B1C2771DC7F5278B22BA27776B6714F45367",
+    "src-tauri/src/database/dump.rs": "6632363928F7A69D0C3CFA463D5C6EC4496C90E74CC96E2617D6F9AFB928F2B3",
+    "src-tauri/src/database/mod.rs": "B773D7B66708FD1460CA66EE27965504B65B340ABBB7E8363CA99AF9CDE11842",
+    "src-tauri/src/database/mssql.rs": "9E8D53ED0989C8A20C96E2CD426F7DB7890E16F1CB3763B4C182FE89AD4FF445",
+    "src-tauri/src/database/mysql.rs": "9DEB82133623FDB94712169DF93443EC768C775740E64A12892040E0CBEB371B",
+    "src-tauri/src/database/postgres.rs": "36AFA589D4C183636F86B7005C0337928DA1F9C741EAAA64A366B2BDA3009DFA",
+    "src-tauri/src/database/sqlite.rs": "A9DFDBF3E5F66678C98C885F2E4F6E873617D2FBE3AE3A0E2761F75389A7519B",
+    "src-tauri/src/export.rs": "9D37F6E5290691ED1829AC9EE09F8B69AFD259C26CF35FE4FC3E87AC4A5D99AE",
+    "src-tauri/src/metadata.rs": "5B9AB23CBA882A397C47C814DE8000B256C4FE6CC370E72865B1ED45BD5B71CA",
+    "src-tauri/src/models/mod.rs": "0D65DA0AE2B9CD2384D892F41882A5EA76FCB6C37C4318D16E185099CDE40ACD",
+    "src-tauri/src/query_tasks.rs": "1C82FB2D1CBACAC2B5292B1D304A3492E6F0DCC7F25477255A4BC3B66AD01772",
+    "src-tauri/tests/export_sqlite.rs": "3F62F4EF8CFB3FAEC4081B1C97F604A02AACABAF4455DDF6270355B94C79AB43",
+    "src-tauri/tests/import_skip_mysql.rs": "2B9C54AAC2FFCC0163615AE25958BF946E04961862DD7ADE268F946ACB77386A",
+    "src-tauri/tests/metadata_mysql.rs": "AE00F77B2B336B191FF092DA92CCD3EA2F289F6D29A75197010712BD85ED3999",
+    "src-tauri/tests/metadata_network.rs": "0A5992E60ACEB301AC0E1B52926B3539B6109EDD03CD99FDFD9D97193EA1E298",
+    "src-tauri/tests/metadata_service.rs": "ABDCB14C7D81714EAEBEB84036418D32705766D63866FB45ED2C15EDFCE97580",
+    "src-tauri/tests/metadata_sqlite.rs": "8B416581C4115ED3484454572071696051F1F2381CF459D86E3143E673EDE6A9",
+    "src/App.tsx": "47CA7043F5FD5943512AB468E400416F6A1194947C514E076BE23C846075FCE3",
+    "src/components/CreateTableView.tsx": "547AF0168EA0913BB899E084D1B70359E64FD0F85512DEC478186FEF58940EC0",
+    "src/components/DatabaseOverview.tsx": "EBB39DFF6A2B592BA0ADA11B1C321560560D3EE536AD6EE499BCA09564BC8B88",
+    "src/components/TableView.tsx": "BB10A39A51E528F3E87D69AF9FC0C7BA8B835F3E6171EC15BCCAC5D3EE062598",
+    "src/components/ViewView.tsx": "30BD8611873BFB8418BB49004B313A0F516952BCCB7B60FF29BFB3BCB9F4FD32",
+    "src/components/connection/ConnectionTree.tsx": "E7B0B21A1D969B25CD27F5C3BBF8F9E89D96647A1BA12839FD8EA0247E2CA0CE",
+    "src/components/connection/ExportSqlDialog.tsx": "91D28B56356B1146C8D3EA94448B3BB527EA80BACB5CD60B354F857497BF6EC2",
+    "src/lib/ddl.ts": "B96B9F4273F8894A5A48B5C30C0E54F9224F68D621F8BB0F197ADE6D1E35009B",
+    "src/lib/metadataCache.ts": "FAF4174AC6B3AB4F0D97C3556C3A752DEF2BAE1449D6DC87E9087511C5FBB385",
+    "src/lib/objectIdentity.ts": "4ACA7029A4B404C851DAAC8A9FF5F45ECC42E10BCA25EB73D916EA2F13B278F6",
+    "src/lib/sqlTable.ts": "E271DB6BD4552EF86021D46E963BB910B5A1E888602274B05434C837D1588477",
+    "src/services/tauriService.ts": "D7CFB5A299CAA09309995DBBF951D4887515E69F11259672DBDAAD256344A504",
+    "src/stores/connectionStore.ts": "E24EB80519693F76A3FB519201B542BB6D5FFEDEBA84DB628699DBA37BA9804E",
+    "src/stores/gridDraftStore.ts": "ED2B42B832AE3C31D4A06A3123F308117B0196B2172021AC2CA5AA3F51AE5511",
+    "src/stores/workspaceStore.ts": "7FDD942F5CD5E8B59FCF942C697A516D9CE730A9C097D7AB933FDD0876BD5B1C",
+    "src/types/database.ts": "AD365DA12589820074144D53DFEA3E56FF3A6B5011B84425DBFAACE37244C249",
+    "tests/ddlIdentity.test.ts": "27FE4FE6A08B3645C84BFD53399E8E4154D01E56301CDDF2ECE4AB22D7290C7C",
+    "tests/exportJob.component.test.tsx": "395435C2A6C7AEC6240D5827F241B3601611CDD7C9BCF97B5D8DE71DE2EAA26F",
+    "tests/metadataCache.test.ts": "5ABE3B8F8E4416D2E0A83B167CC8BF1F4DB9A5B80798A74DFD8E2B5E299A47EF",
+    "tests/metadataNavigation.component.test.tsx": "211A14DF9A9293EAD4773B923466945D89051A4DB0448FC57C2EDD7E9F5CC5C7",
+    "tests/metadataStructure.component.test.tsx": "5914101E6C7B109DC678CF7BF421614B28923BF01CB8A42DEABF157F4E0ACF00",
+    "tests/metadataTree.component.test.tsx": "54BC294076B059A1B41C577DFBDDD238301788AE57E310A96E7A78E9BF29815F",
+    "tests/objectIdentity.test.ts": "07C7A0D3176CB30052DEB153CF485B68F5F55DAA1101416A409E69C3E379EC31",
+    "tests/tableNavigation.component.test.tsx": "DDAA21C2E94F6EBD2901438A9C78879BF3FC64B77BF417375F5FF5345465F899"
+  },
+  "Cleanup": {
+    "CompletedUtc": "2026-10-20T09:19:19.9031452Z",
+    "GracefulDatabaseStop": true,
+    "OwnedProcessesRemaining": 0,
+    "ReparsePointsFound": 0,
+    "Removed": [
+      {
+        "Path": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-f17aac3f694f40619ebd838eaa838b12",
+        "Bytes": 3197187708,
+        "ExistsAfter": false
+      },
+      {
+        "Path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\sqlink-p203-4f04e7acd6364a1ab1eeefebcccec75f",
+        "Bytes": 3127437710,
+        "ExistsAfter": false
+      }
+    ],
+    "FreedBytes": 6324625418,
+    "OtherProjectsProcessesUntouched": true,
+    "ByteMeasurement": "删除前各文件 Length 合计，非磁盘空闲空间前后差值。"
+  }
+}

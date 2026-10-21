@@ -1,0 +1,31 @@
+{
+  "GeneratedUtc": "2026-10-20T07:09:05.2195673Z",
+  "Purpose": "本轮真实数据库验收专用实例；无系统服务安装，不改既有数据库。",
+  "LabRoot": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-e0f3e507479e4e93897cdd8aae09e7b5",
+  "Credentials": "连接串与密码运行时仅保存在实验目录内 ACL 受限的 ignored 文件；已随本轮实验目录清理，公开清单不含凭据。",
+  "Instances": [
+    {
+      "Engine": "mysql57",
+      "Version": "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqld.exe  Ver 5.7.44 for Win64 on x86_64 (MySQL Community Server (GPL))",
+      "Host": "127.0.0.1",
+      "Port": 60530,
+      "Pid": 52200,
+      "StartedUtc": "2026-10-20T06:57:40.8025956Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-e0f3e507479e4e93897cdd8aae09e7b5\\mysql57-data",
+      "Bin": "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin",
+      "Database": "sqlink_test_c6433233adbc4e5c8fc92794976706cb",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-e0f3e507479e4e93897cdd8aae09e7b5\\test-env.ps1"
+    }
+  ],
+  "DownloadEvidence": [],
+  "SqlServer": "已核对 PATH、已知 Program Files 目录和服务名称，未发现 SQL Server/LocalDB/Express/Docker/Podman 可用运行时；未安装 SQL Server 或创建系统服务。",
+  "Cleanup": {
+    "CompletedUtc": "2026-10-20T07:23:56.9732937Z",
+    "DirectoriesDeleted": true,
+    "CredentialsDeleted": true,
+    "CheckedResolvedPaths": true,
+    "CheckedReparsePoints": true,
+    "CheckedOwningProcesses": true
+  }
+}

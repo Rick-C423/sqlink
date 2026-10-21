@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { tauriService } from "@/services/tauriService";
 import { buildCreateTableStatements, ColumnDraft, DefaultKind, FkDraft, IndexDraft } from "@/lib/ddl";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui";
 import { cn, commonDataTypes } from "@/lib/utils";
 import { Check, Loader2, Plus, Undo2, X } from "lucide-react";
 import { useT } from "@/i18n";
+import { databaseNodeId, relationNode } from "@/lib/objectIdentity";
 
 interface CreateTableViewProps {
   connectionId: string;
@@ -46,14 +47,36 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
   const [showSql, setShowSql] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const connectionEpoch = useConnectionStore((state) => state.connectionEpochs[connectionId] ?? 0);
+  const sourceKey = JSON.stringify([connectionId, connectionEpoch, database, tabId]);
+  const sourceRef = useRef(sourceKey);
+  sourceRef.current = sourceKey;
+  const mounted = useRef(false);
+  const submitSequence = useRef(0);
+  const activeSubmission = useRef<number | null>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    setSubmitting(false);
+    setError(null);
+    return () => {
+      mounted.current = false;
+      submitSequence.current++;
+      activeSubmission.current = null;
+    };
+  }, [sourceKey]);
 
   const liveCols = cols.filter((c) => !c.deleted && c.name.trim());
-  const statements = buildCreateTableStatements(driverType, tableName, cols, idxs, fks, tableComment);
+  let statements: string[] = [];
+  let ddlError: string | null = null;
+  try { statements = buildCreateTableStatements(driverType, tableName, cols, idxs, fks, tableComment); }
+  catch (err) { ddlError = String(err); }
 
   const updateCol = (i: number, patch: Partial<ColumnDraft>) =>
     setCols((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
   const validate = (): string | null => {
+    if (ddlError) return ddlError;
     if (!tableName.trim()) return t("createTable.nameRequired");
     if (liveCols.length === 0) return t("createTable.needColumn");
     const names = liveCols.map((c) => c.name.trim().toLowerCase());
@@ -62,39 +85,51 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
   };
 
   const handleSubmit = async () => {
+    const state = useConnectionStore.getState();
+    if (!mounted.current || activeSubmission.current !== null || sourceRef.current !== sourceKey ||
+        (state.connectionEpochs[connectionId] ?? 0) !== connectionEpoch ||
+        (connectionEpoch > 0 && !state.liveIds.has(connectionId))) return;
     const err = validate();
     if (err) {
       setError(err);
       return;
     }
+    const request = ++submitSequence.current;
+    activeSubmission.current = request;
+    const frozen = { connectionId, connectionEpoch, database, tabId, table: tableName.trim(), statements: [...statements], sourceKey };
+    const isCurrent = () => mounted.current && activeSubmission.current === request &&
+      submitSequence.current === request && sourceRef.current === frozen.sourceKey &&
+      (useConnectionStore.getState().connectionEpochs[frozen.connectionId] ?? 0) === frozen.connectionEpoch;
+    let ddlCompleted = false;
     setSubmitting(true);
     setError(null);
     try {
-      await tauriService.executeBatch(connectionId, database, statements);
+      await tauriService.executeBatch(frozen.connectionId, frozen.database, frozen.statements);
+      ddlCompleted = true;
+      if (!isCurrent()) return;
 
       // 刷新连接树中该库的表列表
-      const dbNodeId = `${connectionId}::db::${database}`;
-      const tables = await tauriService.getTables(connectionId, database);
+      const dbNodeId = databaseNodeId(frozen.connectionId, frozen.database);
+      const tables = await tauriService.getTables(frozen.connectionId, frozen.database);
+      if (!isCurrent()) return;
+      const created = await tauriService.resolveTable(frozen.connectionId, frozen.database, [frozen.table]);
+      if (!isCurrent()) return;
       const cs = useConnectionStore.getState();
       cs.updateNodeChildren(
         dbNodeId,
-        tables.map((tb) => ({
-          id: `${dbNodeId}::table::${tb.name}`,
-          type: "table" as const,
-          name: tb.name,
-          metadata: { rowCount: tb.rowCount },
-        }))
+        tables.map((tb) => relationNode(dbNodeId, "table", frozen.connectionId, frozen.database, tb))
       );
       cs.expandNode(dbNodeId);
 
       // 打开新表视图并关闭设计器
       const ws = useWorkspaceStore.getState();
-      ws.openTable(connectionId, database, tableName.trim());
-      ws.close(tabId);
+      ws.openTable(frozen.connectionId, created.database, created.table, undefined, created.schema ?? undefined);
+      void ws.close(frozen.tabId);
     } catch (err) {
-      setError(t("createTable.createFailed", { error: String(err) }));
+      if (isCurrent()) setError(ddlCompleted ? `建表语句已执行，但结构刷新失败：${String(err)}` :
+        t("createTable.createFailed", { error: String(err) }));
     } finally {
-      setSubmitting(false);
+      if (isCurrent()) { activeSubmission.current = null; setSubmitting(false); }
     }
   };
 
@@ -157,6 +192,7 @@ export function CreateTableView({ connectionId, database, tabId }: CreateTableVi
       {error && (
         <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">{error}</div>
       )}
+      {ddlError && <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200">{ddlError}</div>}
       {showSql && (
         <pre className="px-3 py-2 text-xs bg-gray-900 text-green-300 border-b overflow-auto max-h-40">
           {statements.length > 0 ? statements.join("\n") : t("createTable.sqlPlaceholder")}

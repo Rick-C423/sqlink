@@ -1,5 +1,8 @@
-import { useState, useCallback } from "react";
-import { ConnectionConfig, DatabaseInfo, TreeNode } from "@/types/database";
+import { useState, useCallback, useRef } from "react";
+import { ConnectionConfig, DatabaseInfo, TreeNode, MetadataSnapshot } from "@/types/database";
+import { databaseNodeId, relationNode } from "@/lib/objectIdentity";
+import { metadataCache } from "@/lib/metadataCache";
+import { quoteTable, tableParts } from "@/lib/sqlTable";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { tauriService } from "@/services/tauriService";
@@ -9,6 +12,7 @@ import { ContextMenu, MenuItem } from "@/components/ContextMenu";
 import { CreateDatabaseDialog } from "@/components/connection/CreateDatabaseDialog";
 import { ImportSqlDialog } from "@/components/connection/ImportSqlDialog";
 import { ExportSqlDialog } from "@/components/connection/ExportSqlDialog";
+import { CredentialStatus } from "@/components/connection/CredentialStatus";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useT } from "@/i18n";
 import type { MessageKey } from "@/i18n/zh-CN";
@@ -73,38 +77,6 @@ interface MenuState {
 const LEAF_TYPES: TreeNode["type"][] = ["column", "index", "trigger", "procedure", "function"];
 const isLeafType = (type: TreeNode["type"]) => LEAF_TYPES.includes(type);
 
-/** 数据库列表缓存：连接成功先展示缓存，后台再刷新，避免大规模实例阻塞连接。 */
-const DATABASE_CACHE_TTL_MS = 10 * 60 * 1000;
-
-function databaseCacheKey(connectionId: string): string {
-  return `sqlink:database-list:${connectionId}`;
-}
-
-function readDatabaseCache(connectionId: string): DatabaseInfo[] | null {
-  try {
-    const raw = localStorage.getItem(databaseCacheKey(connectionId));
-    if (!raw) return null;
-    const cached = JSON.parse(raw) as { savedAt: number; databases: DatabaseInfo[] };
-    if (Date.now() - cached.savedAt > DATABASE_CACHE_TTL_MS || !Array.isArray(cached.databases)) {
-      return null;
-    }
-    return cached.databases;
-  } catch {
-    return null;
-  }
-}
-
-function writeDatabaseCache(connectionId: string, databases: DatabaseInfo[]): void {
-  try {
-    localStorage.setItem(
-      databaseCacheKey(connectionId),
-      JSON.stringify({ savedAt: Date.now(), databases })
-    );
-  } catch {
-    // 缓存不可用不影响数据库连接和列表加载。
-  }
-}
-
 function buildDatabaseNodes(
   connectionId: string,
   driverType: string,
@@ -124,9 +96,10 @@ function buildDatabaseNodes(
     );
   }
   return visible.map((database) => ({
-    id: `${connectionId}::db::${database.name}`,
+    id: databaseNodeId(connectionId, database.name),
     type: "database" as const,
     name: database.name,
+    source: { connectionId, database: database.name },
     metadata: { accessible: database.accessible },
   }));
 }
@@ -181,6 +154,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   const [importFor, setImportFor] = useState<{ connId: string; db: string } | null>(null);
   // SQL 转储（导出）对话框的目标库 { connId, db }
   const [exportFor, setExportFor] = useState<{ connId: string; db: string } | null>(null);
+  const requests = useRef(new Map<string, number>());
+  const refreshEpochs = useRef(new Map<string, number>());
 
   const getDriverType = useCallback(
     (connectionId: string) =>
@@ -190,7 +165,20 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
 
   const loadChildren = useCallback(
     async (node: TreeNode, force = false, silent = false) => {
-      if (!force && (node.children || loadingNodes.has(node.id))) return;
+      const state = useConnectionStore.getState();
+      if (!force && (node.children || state.loadingNodes.has(node.id))) return;
+      const connectionId = node.type === "connection" ? node.id : node.source?.connectionId;
+      if (!connectionId || !state.liveIds.has(connectionId)) return;
+      const epoch = state.connectionEpochs[connectionId] ?? 0;
+      const refreshEpoch = refreshEpochs.current.get(connectionId) ?? 0;
+      const request = (requests.current.get(node.id) ?? 0) + 1;
+      requests.current.set(node.id, request);
+      const current = () => {
+        const latest = useConnectionStore.getState();
+        return latest.liveIds.has(connectionId) && (latest.connectionEpochs[connectionId] ?? 0) === epoch
+          && (refreshEpochs.current.get(connectionId) ?? 0) === refreshEpoch
+          && requests.current.get(node.id) === request;
+      };
 
       if (!silent) setNodeLoading(node.id, true);
       try {
@@ -200,31 +188,13 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           case "connection": {
             const connectionId = node.id;
             const driverType = getDriverType(connectionId);
-            const showHidden = useConnectionStore.getState().showSystemDatabases;
-            const cached = force ? null : readDatabaseCache(connectionId);
-            let databases: DatabaseInfo[];
-            if (cached) {
-              databases = cached;
-              // 缓存立即可见；真实权限状态在后台刷新，不阻塞界面。
-              void tauriService.getDatabaseInfos(connectionId).then((fresh) => {
-                writeDatabaseCache(connectionId, fresh);
-                const currentShowHidden = useConnectionStore.getState().showSystemDatabases;
-                updateNodeChildren(
-                  connectionId,
-                  buildDatabaseNodes(connectionId, driverType, fresh, currentShowHidden)
-                );
-              }).catch(() => undefined);
-            } else {
-              databases = await tauriService.getDatabaseInfos(connectionId);
-              writeDatabaseCache(connectionId, databases);
-            }
-            children = buildDatabaseNodes(connectionId, driverType, databases, showHidden);
+            // 权限和连接代次无法由旧持久缓存证明，连接时重新读取库列表。
+            const databases = await tauriService.getDatabaseInfos(connectionId);
+            children = buildDatabaseNodes(connectionId, driverType, databases, useConnectionStore.getState().showSystemDatabases);
             break;
           }
           case "database": {
-            const parts = node.id.split("::");
-            const connectionId = parts[0];
-            const dbName = parts[2];
+            const dbName = node.source!.database;
             // 表/视图/触发器/存储过程/函数一起拉；任何一类失败不阻塞其他
             const [tables, views, triggers, procedures, functions] = await Promise.all([
               tauriService.getTables(connectionId, dbName),
@@ -233,24 +203,16 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               tauriService.getProcedures(connectionId, dbName).catch(() => []),
               tauriService.getFunctions(connectionId, dbName).catch(() => []),
             ]);
-            children = tables.map((tb) => ({
-              id: `${node.id}::table::${tb.name}`,
-              type: "table" as const,
-              name: tb.name,
-              metadata: { rowCount: tb.rowCount },
-            }));
+            children = tables.map((tb) => relationNode(node.id, "table", connectionId, dbName, tb));
             // 有视图时追加「视图 (n)」分组节点，视图收在里面
             if (views.length > 0) {
               children.push({
                 id: `${node.id}::group::views`,
                 type: "folder" as const,
                 name: t("tree.viewsGroup", { count: views.length }),
+                source: node.source,
                 metadata: { isGroup: true, groupKind: "views" },
-                children: views.map((v) => ({
-                  id: `${node.id}::view::${v.name}`,
-                  type: "view" as const,
-                  name: v.name,
-                })),
+                children: views.map((v) => relationNode(node.id, "view", connectionId, dbName, v)),
               });
             }
             // 触发器 / 存储过程 / 函数分组（SQLite 无后两者，驱动返回空列表自然不显示）
@@ -259,11 +221,13 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::group::triggers`,
                 type: "folder" as const,
                 name: t("tree.triggersGroup", { count: triggers.length }),
+                source: node.source,
                 metadata: { isGroup: true, groupKind: "triggers" },
                 children: triggers.map((tr) => ({
                   id: `${node.id}::trigger::${tr.name}`,
                   type: "trigger" as const,
                   name: tr.name,
+                  source: { connectionId, database: dbName, table: tr.name },
                   metadata: tr.comment ? { comment: tr.comment } : undefined,
                 })),
               });
@@ -273,11 +237,13 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::group::procedures`,
                 type: "folder" as const,
                 name: t("tree.proceduresGroup", { count: procedures.length }),
+                source: node.source,
                 metadata: { isGroup: true, groupKind: "procedures" },
                 children: procedures.map((p) => ({
                   id: `${node.id}::procedure::${p.name}`,
                   type: "procedure" as const,
                   name: p.name,
+                  source: { connectionId, database: dbName, table: p.name },
                   metadata: p.comment ? { comment: p.comment } : undefined,
                 })),
               });
@@ -287,62 +253,41 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::group::functions`,
                 type: "folder" as const,
                 name: t("tree.functionsGroup", { count: functions.length }),
+                source: node.source,
                 metadata: { isGroup: true, groupKind: "functions" },
                 children: functions.map((f) => ({
                   id: `${node.id}::function::${f.name}`,
                   type: "function" as const,
                   name: f.name,
+                  source: { connectionId, database: dbName, table: f.name },
                   metadata: f.comment ? { comment: f.comment } : undefined,
                 })),
               });
             }
             break;
           }
-          case "view": {
-            // 视图展开只显示列（索引/外键对视图意义不大）
-            const viewParts = node.id.split("::");
-            const connectionId = viewParts[0];
-            const dbName = viewParts[2];
-            const viewName = viewParts[viewParts.length - 1];
-            const columns = await tauriService.getColumns(connectionId, dbName, viewName);
-            children = [
-              {
-                id: `${node.id}::folder::columns`,
-                type: "folder" as const,
-                name: t("tree.columnsGroup", { count: columns.length }),
-                metadata: { isGroup: true, groupKind: "columns" },
-                children: columns.map((col) => ({
-                  id: `${node.id}::col::${col.name}`,
-                  type: "column" as const,
-                  name: `${col.name} (${col.dataType}${col.nullable ? "" : " NOT NULL"})`,
-                  metadata: { ...col } as Record<string, unknown>,
-                })),
-              },
-            ];
-            break;
-          }
+          case "view":
           case "table": {
-            // 节点 id 格式: {connectionId}::db::{dbName}::table::{tableName}
-            const tableParts = node.id.split("::");
-            const connectionId = tableParts[0];
-            const dbName = tableParts[1] === "db" ? tableParts[2] : undefined;
-            const tableName = tableParts[tableParts.length - 1];
-
-            const [columns, indexes] = await Promise.all([
-              tauriService.getColumns(connectionId, dbName, tableName),
-              tauriService.getIndexes(connectionId, dbName, tableName),
-            ]);
+            const source = node.source!;
+            if (!source.table) return;
+            const context = { ...source, table: source.table, driverType: getDriverType(connectionId) };
+            const snapshot = await metadataCache.get({ ...context, connectionEpoch: epoch, category: "structure" },
+              () => tauriService.getTableMetadata(connectionId, source.database, tableParts(context)), force);
+            const columns = snapshot.target.columns;
+            const indexes = snapshot.indexes;
 
             children = [
               {
                 id: `${node.id}::folder::columns`,
                 type: "folder" as const,
                 name: t("tree.columnsGroup", { count: columns.length }),
+                source,
                 metadata: { isGroup: true, groupKind: "columns" },
                 children: columns.map((col) => ({
-                  id: `${node.id}::col::${col.name}`,
+                  id: JSON.stringify([node.id, "column", col.name]),
                   type: "column" as const,
                   name: `${col.name} (${col.dataType}${col.nullable ? "" : " NOT NULL"})`,
+                  source,
                   metadata: { ...col } as Record<string, unknown>,
                 })),
               },
@@ -350,25 +295,35 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 id: `${node.id}::folder::indexes`,
                 type: "folder" as const,
                 name: t("tree.indexesGroup", { count: indexes.length }),
+                source,
                 metadata: { isGroup: true, groupKind: "indexes" },
                 children: indexes.map((idx) => ({
-                  id: `${node.id}::idx::${idx.name}`,
+                  id: JSON.stringify([node.id, "index", idx.name]),
                   type: "index" as const,
                   name: idx.name,
+                  source,
                   metadata: { ...idx } as Record<string, unknown>,
                 })),
               },
             ];
+            if (node.type === "view") children = children.slice(0, 1);
             break;
           }
         }
 
-        updateNodeChildren(node.id, children);
-        if (!silent) setNodeLoading(node.id, false);
+        if (current()) {
+          updateNodeChildren(node.id, children);
+          if (!silent) setNodeLoading(node.id, false);
+        }
       } catch (err) {
         console.error("Failed to load children:", err);
-        setError(t("tree.loadFailed", { error: String(err) }));
-        if (!silent) setNodeLoading(node.id, false);
+        if (current()) {
+          setError(t("tree.loadFailed", { error: String(err) }));
+          if (!silent) setNodeLoading(node.id, false);
+        }
+      } finally {
+        // 迟到任务可以释放自己的加载标记，但不能清除同节点较新请求的标记。
+        if (!silent && requests.current.get(node.id) === request) setNodeLoading(node.id, false);
       }
     },
     [loadingNodes, setNodeLoading, updateNodeChildren, getDriverType, t]
@@ -377,6 +332,11 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   /** 刷新节点：清空子树并重新加载 */
   const refreshNode = useCallback(
     (node: TreeNode) => {
+      const connectionId = node.type === "connection" ? node.id : node.source?.connectionId;
+      if (connectionId) {
+        metadataCache.invalidateConnection(connectionId);
+        refreshEpochs.current.set(connectionId, (refreshEpochs.current.get(connectionId) ?? 0) + 1);
+      }
       clearNodeChildren(node.id);
       expandNode(node.id);
       loadChildren({ ...node, children: undefined }, true);
@@ -411,7 +371,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         markLive(node.id, true);
         setActiveConnection(node.id);
         expandNode(node.id);
-        // 连接状态立即生效；数据库列表使用缓存并在后台刷新，不阻塞连接操作。
+        // 连接状态立即生效；数据库列表异步读取，不阻塞连接操作。
         setNodeLoading(node.id, false);
         void loadChildren({ ...node, children: undefined }, false, true);
       } catch (err) {
@@ -479,9 +439,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         return;
       case "database": {
         // 点击数据库：激活连接 + 设为查询上下文 + 打开库概览 tab
-        const parts = node.id.split("::");
-        const connId = parts[0];
-        const dbName = parts[2];
+        if (!node.source) return;
+        const { connectionId: connId, database: dbName } = node.source;
         setActiveConnection(connId);
         setSelectedDatabase(dbName);
         openDatabase(connId, dbName);
@@ -490,34 +449,28 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       }
       case "table": {
         // 点击表：打开表视图 tab（数据/结构）
-        const parts = node.id.split("::");
-        const connId = parts[0];
-        const dbName = parts[2];
-        const tableName = parts[parts.length - 1];
+        if (!node.source?.table) return;
+        const { connectionId: connId, database: dbName, table: tableName, schema } = node.source;
         setActiveConnection(connId);
         setSelectedDatabase(dbName);
-        openTable(connId, dbName, tableName);
+        openTable(connId, dbName, tableName, "data", schema);
         return;
       }
       case "view": {
         // 点击视图：打开视图 tab（数据只读/定义）
-        const parts = node.id.split("::");
-        const connId = parts[0];
-        const dbName = parts[2];
-        const viewName = parts[parts.length - 1];
+        if (!node.source?.table) return;
+        const { connectionId: connId, database: dbName, table: viewName, schema } = node.source;
         setActiveConnection(connId);
         setSelectedDatabase(dbName);
-        openView(connId, dbName, viewName);
+        openView(connId, dbName, viewName, schema);
         return;
       }
       case "trigger":
       case "procedure":
       case "function": {
         // 点击触发器/存储过程/函数：打开定义 tab（只读）
-        const parts = node.id.split("::");
-        const connId = parts[0];
-        const dbName = parts[2];
-        const objName = parts[parts.length - 1];
+        if (!node.source?.table) return;
+        const { connectionId: connId, database: dbName, table: objName } = node.source;
         setActiveConnection(connId);
         setSelectedDatabase(dbName);
         openRoutine(connId, dbName, node.type, objName);
@@ -535,27 +488,35 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
 
   /** 对表执行 DDL（重命名/清空/删除）并刷新库节点 */
   const runTableDdl = useCallback(
-    async (node: TreeNode, sql: string, failKey: MessageKey) => {
-      const parts = node.id.split("::");
-      const connId = parts[0];
-      const dbName = parts[2];
+    async (node: TreeNode, buildSql: (snapshot: MetadataSnapshot) => string, failKey: MessageKey) => {
+      if (!node.source?.table) return;
+      const { connectionId: connId, database: dbName, table, schema } = node.source;
+      const driverType = getDriverType(connId);
+      const epoch = useConnectionStore.getState().connectionEpochs[connId] ?? 0;
       try {
-        await tauriService.executeQuery(connId, sql, dbName);
-        const dbNodeId = `${connId}::db::${dbName}`;
-        refreshNode({ id: dbNodeId, type: "database", name: dbName });
+        const snapshot = await tauriService.getTableMetadata(connId, dbName, tableParts({ database: dbName, schema, table, driverType }));
+        if ((useConnectionStore.getState().connectionEpochs[connId] ?? 0) !== epoch) {
+          throw new Error("读取结构期间连接已改变，请刷新对象后重试。");
+        }
+        await tauriService.executeDdl({ connectionId: connId, database: snapshot.target.database,
+          connectionGeneration: snapshot.connectionGeneration, revision: snapshot.revision,
+          tableParts: tableParts({ ...snapshot.target, driverType }), statements: [buildSql(snapshot)] });
       } catch (err) {
         setError(t(failKey, { error: String(err) }));
+      } finally {
+        if ((useConnectionStore.getState().connectionEpochs[connId] ?? 0) === epoch) {
+          refreshNode({ id: databaseNodeId(connId, dbName), type: "database", name: dbName, source: { connectionId: connId, database: dbName } });
+        }
       }
     },
-    [refreshNode, t]
+    [refreshNode, getDriverType, t]
   );
 
   /** 删除数据库：DROP DATABASE 后刷新连接节点，并清除查询上下文 */
   const handleDropDatabase = useCallback(
     async (node: TreeNode) => {
-      const parts = node.id.split("::");
-      const connId = parts[0];
-      const dbName = parts[2];
+      if (!node.source) return;
+      const { connectionId: connId, database: dbName } = node.source;
       const driverType = getDriverType(connId);
       try {
         await tauriService.executeQuery(
@@ -574,7 +535,6 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
   );
 
   const buildMenuItems = (node: TreeNode): MenuItem[] => {
-    const parts = node.id.split("::");
 
     if (node.type === "connection") {
       const connected = liveIds.has(node.id);
@@ -655,22 +615,23 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       return items;
     }
 
-    if (node.type === "database") {
-      const driverType = getDriverType(parts[0]);
-      const sysDb = isSystemDatabase(parts[2], driverType);
+    if (node.type === "database" && node.source) {
+      const { connectionId: connId, database: dbName } = node.source;
+      const driverType = getDriverType(connId);
+      const sysDb = isSystemDatabase(dbName, driverType);
       const items: MenuItem[] = [
         {
           label: t("tree.openOverview"),
           icon: <Eye className="h-3.5 w-3.5" />,
-          onClick: () => openDatabase(parts[0], parts[2]),
+          onClick: () => openDatabase(connId, dbName),
         },
         {
           label: t("app.newQuery"),
           icon: <FileCode2 className="h-3.5 w-3.5" />,
           onClick: () => {
-            setActiveConnection(parts[0]);
-            setSelectedDatabase(parts[2]);
-            openQuery(parts[0]);
+            setActiveConnection(connId);
+            setSelectedDatabase(dbName);
+            openQuery(connId);
           },
         },
         {
@@ -681,7 +642,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
         {
           label: t("tree.dumpSql"),
           icon: <Download className="h-3.5 w-3.5" />,
-          onClick: () => setExportFor({ connId: parts[0], db: parts[2] }),
+          onClick: () => setExportFor({ connId: connId, db: dbName }),
         },
       ];
       // 系统库禁止结构变更类操作：新建表 / 导入 / 删除
@@ -693,16 +654,16 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             label: t("tree.newTable"),
             icon: <Table2 className="h-3.5 w-3.5" />,
             onClick: () => {
-              setActiveConnection(parts[0]);
-              setSelectedDatabase(parts[2]);
-              openCreateTable(parts[0], parts[2]);
+              setActiveConnection(connId);
+              setSelectedDatabase(dbName);
+              openCreateTable(connId, dbName);
             },
           }
         );
         items.push({
           label: t("tree.importSql"),
           icon: <Upload className="h-3.5 w-3.5" />,
-          onClick: () => setImportFor({ connId: parts[0], db: parts[2] }),
+          onClick: () => setImportFor({ connId: connId, db: dbName }),
         });
         // SQLite 的"数据库"就是文件本身，不提供删除入口
         if (driverType !== "sqlite") {
@@ -711,7 +672,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             icon: <Trash2 className="h-3.5 w-3.5" />,
             danger: true,
             onClick: () => {
-              if (window.confirm(t("tree.confirmDropDatabase", { name: parts[2] }))) {
+              if (window.confirm(t("tree.confirmDropDatabase", { name: dbName }))) {
                 handleDropDatabase(node);
               }
             },
@@ -721,17 +682,15 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
       return items;
     }
 
-    if (node.type === "table") {
-      const connId = parts[0];
-      const dbName = parts[2];
-      const tableName = parts[parts.length - 1];
+    if (node.type === "table" && node.source?.table) {
+      const { connectionId: connId, database: dbName, table: tableName, schema } = node.source;
       const driverType = getDriverType(connId);
       const q = (n: string) => quoteIdent(n, driverType);
       return [
         {
           label: t("tree.viewData"),
           icon: <Eye className="h-3.5 w-3.5" />,
-          onClick: () => openTable(connId, dbName, tableName, "data"),
+          onClick: () => openTable(connId, dbName, tableName, "data", schema),
         },
         {
           label: t("tree.newQuerySelect"),
@@ -742,15 +701,15 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             // SQL Server 用 TOP，其余用 LIMIT
             const sql =
               driverType === "sqlserver" || driverType === "mssql"
-                ? `SELECT TOP 100 * FROM ${q(tableName)};`
-                : `SELECT * FROM ${q(tableName)} LIMIT 100;`;
+                ? `SELECT TOP 100 * FROM ${quoteTable({ database: dbName, schema, table: tableName, driverType })};`
+                : `SELECT * FROM ${quoteTable({ database: dbName, schema, table: tableName, driverType })} LIMIT 100;`;
             openQuery(connId, sql);
           },
         },
         {
           label: t("tree.designTable"),
           icon: <Wrench className="h-3.5 w-3.5" />,
-          onClick: () => openTable(connId, dbName, tableName, "structure"),
+          onClick: () => openTable(connId, dbName, tableName, "structure", schema),
         },
         {
           label: t("tree.renameTable"),
@@ -758,13 +717,16 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           onClick: () => {
             const newName = window.prompt(t("tree.promptNewTableName"), tableName);
             if (!newName || newName === tableName) return;
-            const sql =
-              driverType === "postgres" || driverType === "postgresql" || driverType === "sqlite"
-                ? `ALTER TABLE ${q(tableName)} RENAME TO ${q(newName)};`
-                : driverType === "sqlserver" || driverType === "mssql"
-                  ? `EXEC sp_rename '${tableName.replace(/'/g, "''")}', '${newName.replace(/'/g, "''")}';`
-                  : `RENAME TABLE ${q(tableName)} TO ${q(newName)};`;
-            runTableDdl(node, sql, "tree.renameFailed");
+            runTableDdl(node, (snapshot) => {
+              const target = quoteTable({ ...snapshot.target, driverType });
+              if (driverType === "postgres" || driverType === "postgresql" || driverType === "sqlite") {
+                return `ALTER TABLE ${target} RENAME TO ${q(newName)};`;
+              }
+              if (driverType === "sqlserver" || driverType === "mssql") {
+                return `EXEC sp_rename N'${target.replace(/'/g, "''")}', N'${newName.replace(/'/g, "''")}', N'OBJECT';`;
+              }
+              return `RENAME TABLE ${target} TO ${quoteTable({ ...snapshot.target, table: newName, driverType })};`;
+            }, "tree.renameFailed");
           },
         },
         {
@@ -777,7 +739,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 filters: [{ name: "CSV", extensions: ["csv"] }],
               });
               if (!path) return;
-              const count = await tauriService.exportTableCsv(connId, dbName, tableName, path);
+              const count = await tauriService.exportTableCsv(connId, dbName, tableName, path, undefined, schema);
               window.alert(t("tree.exportedRows", { count, path }));
             } catch (err) {
               setError(t("tree.exportFailed", { error: String(err) }));
@@ -790,12 +752,10 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           danger: true,
           onClick: () => {
             if (window.confirm(t("tree.confirmTruncate", { name: tableName }))) {
-              // SQLite 没有 TRUNCATE，用 DELETE FROM 代替
-              const sql =
-                driverType === "sqlite"
-                  ? `DELETE FROM ${q(tableName)};`
-                  : `TRUNCATE TABLE ${q(tableName)};`;
-              runTableDdl(node, sql, "tree.truncateFailed");
+              runTableDdl(node, (snapshot) => {
+                const target = quoteTable({ ...snapshot.target, driverType });
+                return driverType === "sqlite" ? `DELETE FROM ${target};` : `TRUNCATE TABLE ${target};`;
+              }, "tree.truncateFailed");
             }
           },
         },
@@ -805,24 +765,21 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           danger: true,
           onClick: () => {
             if (window.confirm(t("tree.confirmDropTable", { name: tableName }))) {
-              runTableDdl(node, `DROP TABLE ${q(tableName)};`, "tree.dropTableFailed");
+              runTableDdl(node, (snapshot) => `DROP TABLE ${quoteTable({ ...snapshot.target, driverType })};`, "tree.dropTableFailed");
             }
           },
         },
       ];
     }
 
-    if (node.type === "view") {
-      const connId = parts[0];
-      const dbName = parts[2];
-      const viewName = parts[parts.length - 1];
+    if (node.type === "view" && node.source?.table) {
+      const { connectionId: connId, database: dbName, table: viewName, schema } = node.source;
       const driverType = getDriverType(connId);
-      const q = (n: string) => quoteIdent(n, driverType);
       return [
         {
           label: t("tree.viewData"),
           icon: <Eye className="h-3.5 w-3.5" />,
-          onClick: () => openView(connId, dbName, viewName),
+          onClick: () => openView(connId, dbName, viewName, schema),
         },
         {
           label: t("tree.newQuerySelect"),
@@ -832,8 +789,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
             setSelectedDatabase(dbName);
             const sql =
               driverType === "sqlserver" || driverType === "mssql"
-                ? `SELECT TOP 100 * FROM ${q(viewName)};`
-                : `SELECT * FROM ${q(viewName)} LIMIT 100;`;
+                ? `SELECT TOP 100 * FROM ${quoteTable({ database: dbName, schema, table: viewName, driverType })};`
+                : `SELECT * FROM ${quoteTable({ database: dbName, schema, table: viewName, driverType })} LIMIT 100;`;
             openQuery(connId, sql);
           },
         },
@@ -847,7 +804,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
                 filters: [{ name: "CSV", extensions: ["csv"] }],
               });
               if (!path) return;
-              const count = await tauriService.exportTableCsv(connId, dbName, viewName, path);
+              const count = await tauriService.exportTableCsv(connId, dbName, viewName, path, undefined, schema);
               window.alert(t("tree.exportedRows", { count, path }));
             } catch (err) {
               setError(t("tree.exportFailed", { error: String(err) }));
@@ -860,17 +817,15 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           danger: true,
           onClick: () => {
             if (window.confirm(t("tree.confirmDropView", { name: viewName }))) {
-              runTableDdl(node, `DROP VIEW ${q(viewName)};`, "tree.dropViewFailed");
+              runTableDdl(node, (snapshot) => `DROP VIEW ${quoteTable({ ...snapshot.target, driverType })};`, "tree.dropViewFailed");
             }
           },
         },
       ];
     }
 
-    if (node.type === "trigger" || node.type === "procedure" || node.type === "function") {
-      const connId = parts[0];
-      const dbName = parts[2];
-      const objName = parts[parts.length - 1];
+    if ((node.type === "trigger" || node.type === "procedure" || node.type === "function") && node.source?.table) {
+      const { connectionId: connId, database: dbName, table: objName } = node.source;
       const routineKind = node.type;
       const driverType = getDriverType(connId);
       const q = (n: string) => quoteIdent(n, driverType);
@@ -903,7 +858,9 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
               }
               sql = `DROP TRIGGER ${q(objName)} ON ${q(table)};`;
             }
-            runTableDdl(node, sql, "tree.dropRoutineFailed");
+            void tauriService.executeQuery(connId, sql, dbName).then(() => {
+              refreshNode({ id: databaseNodeId(connId, dbName), type: "database", name: dbName, source: { connectionId: connId, database: dbName } });
+            }).catch((err) => setError(t("tree.dropRoutineFailed", { error: String(err) })));
           },
         },
       ];
@@ -985,14 +942,14 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
     const isActive =
       (node.type === "connection" && activeConnection === node.id) ||
       (node.type === "database" &&
-        node.id === `${activeConnection}::db::${selectedDatabase}`);
+        node.source?.connectionId === activeConnection && node.source.database === selectedDatabase);
     const paddingLeft = depth * 16 + 8;
     const connected = node.type === "connection" && liveIds.has(node.id);
     const isLeaf = isLeafType(node.type) || isInaccessible;
     const hasMenu = !isInaccessible && ["connection", "database", "table", "view", "trigger", "procedure", "function"].includes(node.type);
     const isSysDb =
       node.type === "database" &&
-      isSystemDatabase(node.name, getDriverType(node.id.split("::")[0]));
+      isSystemDatabase(node.name, getDriverType(node.source?.connectionId ?? node.id));
 
     return (
       <div key={node.id}>
@@ -1107,6 +1064,7 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           </Button>
         </div>
       </div>
+      <CredentialStatus className="border-x-0 border-t-0 shrink-0" />
       {error && (
         <div className="px-3 py-1.5 bg-red-50 text-red-700 text-xs border-b border-red-200 flex items-center justify-between">
           <span className="truncate">{error}</span>
@@ -1156,7 +1114,8 @@ export function ConnectionTree({ onNewConnection, onEditConnection }: Connection
           onClose={() => setImportFor(null)}
           onImported={() =>
             refreshNode({
-              id: `${importFor.connId}::db::${importFor.db}`,
+              id: databaseNodeId(importFor.connId, importFor.db),
+              source: { connectionId: importFor.connId, database: importFor.db },
               type: "database",
               name: importFor.db,
             })

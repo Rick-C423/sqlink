@@ -1,0 +1,82 @@
+{
+  "GeneratedUtc": "2026-10-20T05:35:56.3322369Z",
+  "Purpose": "本轮真实数据库验收专用实例；无系统服务安装，不改既有数据库。",
+  "LabRoot": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09",
+  "Credentials": "运行时连接串与密码仅保存于实验目录的 ACL 受限 ignored 文件；验收结束已随本轮实验目录清理，公开清单不含凭据。",
+  "Cleanup": {
+    "CompletedUtc": "2026-10-20T05:41:40Z",
+    "InstancesStopped": true,
+    "LabDirectoriesDeleted": true,
+    "TemporaryBuildCacheDeleted": true,
+    "IsolatedDesktopExeAndProfileDeleted": true,
+    "IsolatedKeychainEntryAbsentConfirmed": true,
+    "Note": "保留本清单作为运行证据；其中实验目录、数据目录和受保护环境文件路径已不存在。未改既有 MySQL57 服务或用户 SQLink。"
+  },
+  "Instances": [
+    {
+      "Engine": "postgres",
+      "Version": "postgres (PostgreSQL) 17.11",
+      "Host": "127.0.0.1",
+      "Port": 51906,
+      "Pid": 44684,
+      "StartedUtc": "2026-10-20T04:25:47.1019076Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\postgres-data",
+      "Bin": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\postgresql-runtime\\pgsql\\bin",
+      "Database": "sqlink_test_ff792bbc88c7447fb05cde0427351efd",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\test-env.ps1"
+    },
+    {
+      "Engine": "mysql57",
+      "Version": "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqld.exe  Ver 5.7.44 for Win64 on x86_64 (MySQL Community Server (GPL))",
+      "Host": "127.0.0.1",
+      "Port": 49748,
+      "Pid": 27640,
+      "StartedUtc": "2026-10-20T04:30:28.105898Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\mysql-data",
+      "Bin": "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin",
+      "Database": "sqlink_test_322b281c54a44b0bbe5a1b3cadfa3b03",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\test-env.ps1"
+    },
+    {
+      "Engine": "mysql8",
+      "Version": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\mysql8-binaries\\mysql-8.4.11-winx64\\bin\\mysqld.exe  Ver 8.4.11 for Win64 on x86_64 (MySQL Community Server - GPL)",
+      "Host": "127.0.0.1",
+      "Port": 62977,
+      "Pid": 46628,
+      "StartedUtc": "2026-10-20T05:35:15.6953714Z",
+      "Running": false,
+      "DataDir": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\mysql8-data",
+      "Bin": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\mysql8-binaries\\mysql-8.4.11-winx64\\bin",
+      "Database": "sqlink_test_5ab0802734cb40598cbc370b7056c52f",
+      "ProtectedEnvFile": "E:\\KimiData\\kimi\\Workspaces\\SQLConnect\\sqlconnect\\.zcode\\p1-db-lab-40c7b21c3a964a45a925f155fd75ac09\\test-env.ps1"
+    }
+  ],
+  "DownloadEvidence": [
+    {
+      "SourcePage": "https://www.postgresql.org/download/windows/",
+      "MeasuredSha256": "80379B2C04D51C30225532E0AE04509899141E9957ED096FE749D7FD9DF8F82F",
+      "DownloadUrl": "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260616",
+      "FileName": "postgresql-windows-binaries.zip",
+      "VendorChecksumVerified": false,
+      "Length": 381531864,
+      "Verification": "官方推荐EDB分发；SHA256仅为本轮文件指纹，未取得厂商发布SHA256，不能视为厂商校验。",
+      "Version": "17.11",
+      "DistributorPage": "https://www.enterprisedb.com/download-postgresql-binaries",
+      "Engine": "postgres"
+    },
+    {
+      "SourcePage": "https://dev.mysql.com/downloads/mysql/8.4.html",
+      "MeasuredSha256": "A492371D687D2BAB088B0062581144A0044B8964BAEFDF4FAA579292B423D25C",
+      "DownloadUrl": "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-winx64.zip",
+      "FileName": "mysql-8.4.11-winx64.zip",
+      "VendorChecksumVerified": true,
+      "VendorMd5": "2e833921898a9a030ea6bfe81bd811bc",
+      "Verification": "比对MySQL官方下载页发布MD5一致；SHA256另作本轮文件指纹。",
+      "Version": "8.4.11",
+      "Engine": "mysql8"
+    }
+  ],
+  "SqlServer": "已核对 PATH、已知 Program Files 目录和服务名称，未发现 SQL Server/LocalDB/Express/Docker/Podman 可用运行时；未安装 SQL Server 或创建系统服务。"
+}
